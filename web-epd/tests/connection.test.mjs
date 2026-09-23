@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'main.js'), 'utf8');
 
-function harness() {
+function harness({ failService = false } = {}) {
   const nodes = new Map();
   const timers = [];
   let requestCount = 0;
@@ -16,7 +16,10 @@ function harness() {
   let connected = false;
   const characteristic = { startNotifications: async () => {}, addEventListener: () => {} };
   const service = { getCharacteristic: async (id) => id.startsWith('62750002') ? characteristic : { readValue: async () => ({ getUint8: () => 0x16 }) } };
-  const server = { get connected() { return connected; }, getPrimaryService: async () => service };
+  const server = { get connected() { return connected; }, getPrimaryService: async () => {
+    if (failService) throw new Error('service unavailable');
+    return service;
+  } };
   const device = {
     name: 'NRF-EPD-9691',
     addEventListener: (name, fn) => { if (name === 'gattserverdisconnected') disconnectHandler = fn; },
@@ -33,7 +36,7 @@ function harness() {
     } },
     navigator: { bluetooth: { requestDevice: async () => { requestCount++; return device; } } },
     setTimeout: (callback) => { timers.push(callback); },
-    console,
+    console: { error: () => {}, log: () => {} },
     Uint8Array,
     Date,
     TextDecoder,
@@ -88,4 +91,26 @@ test('repeated Connect clicks do not request two devices', async () => {
   await Promise.all([app.context.preConnect(), app.context.preConnect()]);
   assert.equal(app.requests(), 1);
   assert.equal(app.timers.length, 1);
+});
+
+test('partial GATT connection failure disconnects so manual reconnect is possible', async () => {
+  const app = harness({ failService: true });
+  await app.context.preConnect();
+  await app.timers.shift()();
+  assert.equal(app.device.gatt.connected, false);
+  assert.equal(app.node('reconnectbutton').disabled, false);
+  assert.equal(await app.context.reConnect(), true);
+});
+
+test('upload stays disabled until a valid device configuration notification arrives', async () => {
+  const app = harness();
+  app.node('imageFile').files = [{ name: 'test.png' }];
+  app.node('epddriver').options = [{ getAttribute: (key) => key === 'data-size' ? '4.2_400_300' : 'blackWhiteColor' }];
+  app.node('epddriver').selectedIndex = 0;
+  await app.context.preConnect();
+  await app.timers.shift()();
+  assert.equal(app.node('sendimgbutton').disabled, true);
+  vm.runInContext('updateDitcherOptions = () => {}', app.context);
+  app.context.handleNotify(Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 1]), 0);
+  assert.equal(app.node('sendimgbutton').disabled, false);
 });

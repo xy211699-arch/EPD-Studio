@@ -1,6 +1,6 @@
 # 源站快照来源
 
-取得日期：2026-09-24。前端静态文件取自 `https://epd-nrf5.lolicon.in/`，下载时保持 HTTPS 证书校验。下列 SHA-256 是下载后、做任何本地改动之前的原始文件校验值；本地 `index.html` 已移除百度统计，因此当前文件哈希与原始值不同。后续 UI 与错误处理修改还会改变 `index.html`、`js/main.js`，这些数值只用于标识基线。
+取得日期：2026-09-24。前端静态文件取自 `https://epd-nrf5.lolicon.in/`，下载时保持 HTTPS 证书校验。下列 SHA-256 是下载后、做任何本地改动之前的原始文件校验值；本地 `index.html` 已移除百度统计，UI、上传错误处理及图片异步竞态修复还改动了 `index.html`、`js/main.js` 与 `js/crop.js`。这些数值只用于标识基线，不代表当前修改版的哈希。
 
 `index.html`：`https://epd-nrf5.lolicon.in/`，`9226419E1488F87E5E9611EFE354F9BF54E1CDC1E4C8CCEBBB9D8433458C09EB`。
 

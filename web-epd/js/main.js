@@ -6,6 +6,9 @@ let paintManager, cropManager;
 let rleSupport;
 let uploadInProgress = false;
 let connectionInProgress = false;
+let disconnecting = false;
+let deviceConfig = null;
+let imageRevision = 0;
 const uploadState = globalThis.EpdUploadState ? globalThis.EpdUploadState.createUploadState() : null;
 
 const EpdCmd = {
@@ -80,6 +83,7 @@ function resetVariables() {
   epdCharacteristic = null;
   msgIndex = 0;
   rleSupport = false;
+  deviceConfig = null;
 }
 
 async function write(cmd, data, withResponse = true) {
@@ -251,13 +255,20 @@ async function sendimg() {
     return { ok: false, error: '设备未连接' };
   }
 
+  if (!deviceConfig) {
+    setStatus('尚未收到设备配置，请勿上传');
+    return { ok: false, error: '设备配置尚未确认' };
+  }
+
   const canvasSize = document.getElementById('canvasSize').value;
   const ditherMode = document.getElementById('ditherMode').value;
   const epdDriverSelect = document.getElementById('epddriver');
   const selectedOption = epdDriverSelect.options[epdDriverSelect.selectedIndex];
 
-  if (!selectedOption || selectedOption.getAttribute('data-size') !== canvasSize ||
-      selectedOption.getAttribute('data-color') !== ditherMode) {
+  if (!selectedOption || epdDriverSelect.value !== deviceConfig.driver ||
+      selectedOption.getAttribute('data-size') !== canvasSize ||
+      selectedOption.getAttribute('data-color') !== ditherMode ||
+      canvasSize !== deviceConfig.size || ditherMode !== deviceConfig.color) {
     setStatus('画布尺寸或颜色模式与设备驱动不匹配，请核对后再上传');
     return { ok: false, error: '图片设置与设备驱动不匹配' };
   }
@@ -374,7 +385,7 @@ function updateButtonStatus(forceDisabled = false) {
   const connect = document.getElementById('connectbutton');
   if (connect) connect.disabled = connectionInProgress || uploadInProgress;
   const send = document.getElementById('sendimgbutton');
-  if (send) send.disabled = !connected || !imageReady || forceDisabled || connectionInProgress || uploadInProgress;
+  if (send) send.disabled = !connected || !deviceConfig || !imageReady || forceDisabled || connectionInProgress || uploadInProgress;
   for (const id of ['sendcmdbutton', 'calendarmodebutton', 'clockmodebutton', 'clearscreenbutton', 'setDriverbutton']) {
     const button = document.getElementById(id);
     if (button) button.disabled = !connected || forceDisabled || connectionInProgress || uploadInProgress;
@@ -397,12 +408,22 @@ function renderConnectionStatus() {
 }
 
 function disconnect() {
-  resetVariables();
-  if (uploadState) uploadState.setStatus('error');
-  addLog('已断开连接.');
-  setStatus('设备已断开，可点击“重连”');
-  document.getElementById("connectbutton").innerHTML = '连接';
-  updateButtonStatus();
+  if (disconnecting) return;
+  disconnecting = true;
+  try {
+    resetVariables();
+    if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+      try { bleDevice.gatt.disconnect(); }
+      catch (error) { addLog(`断开 GATT 失败：${error.message || error}`); }
+    }
+    if (uploadState) uploadState.setStatus('error');
+    addLog('已断开连接.');
+    setStatus('设备已断开，可点击“重连”');
+    document.getElementById("connectbutton").innerHTML = '连接';
+    updateButtonStatus();
+  } finally {
+    disconnecting = false;
+  }
 }
 
 async function preConnect() {
@@ -469,10 +490,25 @@ function handleNotify(value, idx) {
     addLog(`收到配置：${bytes2hex(data)}`);
     const epdpins = document.getElementById("epdpins");
     const epddriver = document.getElementById("epddriver");
+    if (data.length < 8) {
+      setStatus('设备配置数据不完整，请勿上传');
+      return;
+    }
     epdpins.value = bytes2hex(data.slice(0, 7));
     if (data.length > 10) epdpins.value += bytes2hex(data.slice(10, 11));
     epddriver.value = bytes2hex(data.slice(7, 8));
+    const selectedOption = epddriver.options[epddriver.selectedIndex];
+    if (!selectedOption) {
+      setStatus('设备驱动未被当前网页识别，请勿上传');
+      return;
+    }
+    deviceConfig = {
+      driver: epddriver.value,
+      size: selectedOption.getAttribute('data-size'),
+      color: selectedOption.getAttribute('data-color'),
+    };
     updateDitcherOptions();
+    updateButtonStatus();
   } else {
     if (textDecoder == null) textDecoder = new TextDecoder();
     const msg = textDecoder.decode(data);
@@ -544,6 +580,7 @@ async function connect() {
 
   document.getElementById("connectbutton").innerHTML = '断开';
   if (uploadState) uploadState.setStatus('connected');
+  if (!deviceConfig) setStatus('已连接，等待设备配置通知后才能上传');
   updateButtonStatus();
 }
 
@@ -600,9 +637,11 @@ function setCanvasTitle(title) {
 
 function updateImage() {
   const imageFile = document.getElementById('imageFile');
+  const revision = ++imageRevision;
+  const selectedFile = imageFile.files && imageFile.files[0];
   if (uploadState) uploadState.setImage(false);
   updateButtonStatus();
-  if (imageFile.files.length == 0) {
+  if (!selectedFile) {
     fillCanvas('white');
     return;
   }
@@ -610,8 +649,10 @@ function updateImage() {
   const image = new Image();
   image.onload = function () {
     URL.revokeObjectURL(this.src);
+    if (revision !== imageRevision || imageFile.files[0] !== selectedFile) return;
     if (image.width / image.height == canvas.width / canvas.height) {
       if (cropManager.isCropMode()) cropManager.exitCropMode();
+      cropManager.resetStates();
       ctx.drawImage(image, 0, 0, image.width, image.height, 0, 0, canvas.width, canvas.height);
       convertDithering();
       if (uploadState) uploadState.setImage(true);
@@ -624,11 +665,12 @@ function updateImage() {
   };
   image.onerror = function () {
     URL.revokeObjectURL(this.src);
+    if (revision !== imageRevision || imageFile.files[0] !== selectedFile) return;
     setStatus('图片无法解码，请重新选择文件');
     if (uploadState) uploadState.setImage(false);
     updateButtonStatus();
   };
-  image.src = URL.createObjectURL(imageFile.files[0]);
+  image.src = URL.createObjectURL(selectedFile);
 }
 
 function updateCanvasSize() {
@@ -726,14 +768,18 @@ function convertDithering() {
 function applyDither() {
   const imageFile = document.getElementById('imageFile');
   if (!imageFile.files || imageFile.files.length === 0) return;
+  const selectedFile = imageFile.files[0];
+  const revision = ++imageRevision;
+  const isCurrent = () => revision === imageRevision && imageFile.files[0] === selectedFile;
   if (uploadState) uploadState.setImage(false);
   updateButtonStatus();
   cropManager.finishCrop(() => {
+    if (!isCurrent()) return;
     convertDithering();
     if (uploadState) uploadState.setImage(true);
     setStatus('图片已准备好，请检查预览');
     updateButtonStatus();
-  });
+  }, isCurrent);
 }
 
 function initEventHandlers() {

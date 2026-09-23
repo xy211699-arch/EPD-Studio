@@ -9,6 +9,7 @@ class CropManager {
     this.lastPanX = 0;
     this.lastPanY = 0;
     this.lastTouchDistance = 0;
+    this.backgroundUrl = null;
 
     // Bind event handlers
     this.handleBackgroundZoom = this.handleBackgroundZoom.bind(this);
@@ -46,6 +47,9 @@ class CropManager {
     this.canvas.removeEventListener('touchmove', this.handleTouchMove);
     this.canvas.removeEventListener('touchend', this.handleBackgroundPanEnd);
     this.canvas.removeEventListener('touchcancel', this.handleBackgroundPanEnd);
+    if (this.backgroundUrl) URL.revokeObjectURL(this.backgroundUrl);
+    this.backgroundUrl = null;
+    this.canvas.style.backgroundImage = '';
   }
 
   initializeCrop() {
@@ -58,7 +62,8 @@ class CropManager {
     this.exitCropMode();
     this.resetStates();
 
-    this.canvas.style.backgroundImage = `url(${URL.createObjectURL(imageFile.files[0])})`;
+    this.backgroundUrl = URL.createObjectURL(imageFile.files[0]);
+    this.canvas.style.backgroundImage = `url(${this.backgroundUrl})`;
     this.canvas.style.backgroundSize = '100%';
     this.canvas.style.backgroundPosition = '';
     this.canvas.style.backgroundRepeat = 'no-repeat';
@@ -83,13 +88,15 @@ class CropManager {
     this.canvas.parentNode.classList.add('crop-mode');
   }
 
-  finishCrop(callback) {
+  finishCrop(callback, isCurrent = () => true) {
     const imageFile = document.getElementById('imageFile');
     if (imageFile.files.length == 0) return;
+    const selectedFile = imageFile.files[0];
 
     const image = new Image();
     image.onload = () => {
       URL.revokeObjectURL(image.src);
+      if (!isCurrent() || imageFile.files[0] !== selectedFile) return;
 
       const fieldsetRect = this.canvas.getBoundingClientRect();
       const scale = (image.width / fieldsetRect.width) / this.backgroundZoom;
@@ -105,7 +112,7 @@ class CropManager {
       this.exitCropMode();
       if (callback) callback();
     };
-    image.src = URL.createObjectURL(imageFile.files[0]);
+    image.src = URL.createObjectURL(selectedFile);
   }
 
   handleTouchStart(e) {

@@ -39,7 +39,7 @@ function makeHarness({ imageSelected = true } = {}) {
   };
   vm.createContext(context);
   vm.runInContext(mainSource, context);
-  vm.runInContext('canvas = canvasMock; ctx = ctxMock; cropManager = cropMock; rleSupport = false; startTime = Date.now(); gattServer = { connected: true }; epdCharacteristic = {}; addLog = (message) => logs.push(message);', context);
+  vm.runInContext("canvas = canvasMock; ctx = ctxMock; cropManager = cropMock; rleSupport = false; startTime = Date.now(); gattServer = { connected: true }; epdCharacteristic = {}; deviceConfig = { driver: '01', size: '4.2_400_300', color: 'blackWhiteColor' }; addLog = (message) => logs.push(message);", context);
   return { context, node, logs };
 }
 
@@ -107,6 +107,28 @@ test('failed REFRESH is reported as failure', async () => {
 
 test('no selected image prevents any device write', async () => {
   const { context } = makeHarness({ imageSelected: false });
+  const commands = [];
+  context.fakeWrite = async (command) => { commands.push(command); return true; };
+  vm.runInContext('write = fakeWrite', context);
+  const result = await context.sendimg();
+  assert.equal(result.ok, false);
+  assert.deepEqual(commands, []);
+});
+
+test('missing device-reported configuration prevents INIT and upload', async () => {
+  const { context } = makeHarness();
+  vm.runInContext('deviceConfig = null', context);
+  const commands = [];
+  context.fakeWrite = async (command) => { commands.push(command); return true; };
+  vm.runInContext('write = fakeWrite', context);
+  const result = await context.sendimg();
+  assert.equal(result.ok, false);
+  assert.deepEqual(commands, []);
+});
+
+test('edited driver selection cannot override device-reported configuration', async () => {
+  const { context, node } = makeHarness();
+  node('epddriver').value = '03';
   const commands = [];
   context.fakeWrite = async (command) => { commands.push(command); return true; };
   vm.runInContext('write = fakeWrite', context);
