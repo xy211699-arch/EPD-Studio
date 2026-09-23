@@ -108,8 +108,15 @@ async function write(cmd, data, withResponse = true) {
 }
 
 async function writeImage(data, step = 'bw') {
-  const chunkSize = document.getElementById('mtusize').value - 2;
-  const interleavedCount = document.getElementById('interleavedcount').value;
+  const mtu = Number(document.getElementById('mtusize').value);
+  const interleavedCount = Number(document.getElementById('interleavedcount').value);
+  if (!Number.isInteger(mtu) || mtu < 3 || mtu > 255) {
+    throw new Error('MTU 必须是 3 至 255 的整数');
+  }
+  if (!Number.isInteger(interleavedCount) || interleavedCount < 0 || interleavedCount > 500) {
+    throw new Error('确认间隔必须是 0 至 500 的整数');
+  }
+  const chunkSize = mtu - 2;
   let noReplyCount = interleavedCount;
   let totalRleLength = 0;
   const stepText = step === 'bw' ? '数据块' : '红色块';
@@ -234,6 +241,10 @@ async function sendimg() {
   if (!imageFile.files || imageFile.files.length === 0) {
     setStatus('请先选择图片');
     return { ok: false, error: '未选择图片' };
+  }
+  if (uploadState && !uploadState.hasImage) {
+    setStatus('图片尚未完成预览处理');
+    return { ok: false, error: '图片尚未就绪' };
   }
   if (!gattServer || !gattServer.connected || !epdCharacteristic) {
     setStatus('设备未连接，请先连接或重连');
@@ -360,12 +371,29 @@ function updateButtonStatus(forceDisabled = false) {
   const imageReady = uploadState ? uploadState.hasImage : Boolean(imageInput && imageInput.files && imageInput.files.length);
   const reconnect = document.getElementById('reconnectbutton');
   if (reconnect) reconnect.disabled = !bleDevice || connected || connectionInProgress || uploadInProgress;
+  const connect = document.getElementById('connectbutton');
+  if (connect) connect.disabled = connectionInProgress || uploadInProgress;
   const send = document.getElementById('sendimgbutton');
   if (send) send.disabled = !connected || !imageReady || forceDisabled || connectionInProgress || uploadInProgress;
   for (const id of ['sendcmdbutton', 'calendarmodebutton', 'clockmodebutton', 'clearscreenbutton', 'setDriverbutton']) {
     const button = document.getElementById(id);
     if (button) button.disabled = !connected || forceDisabled || connectionInProgress || uploadInProgress;
   }
+  renderConnectionStatus();
+}
+
+function renderConnectionStatus() {
+  const connected = Boolean(gattServer && gattServer.connected);
+  const label = uploadInProgress ? '传输中' : connectionInProgress ? '连接中' : connected ? '已连接' : bleDevice ? '已断开' : '未连接';
+  const phase = uploadInProgress ? 'sending' : connectionInProgress ? 'connecting' : connected ? 'connected' : bleDevice ? 'error' : 'idle';
+  const stateNode = document.getElementById('connectionState');
+  const dotNode = document.getElementById('connectionDot');
+  const nameNode = document.getElementById('deviceName');
+  const guideNode = document.getElementById('guideText');
+  if (stateNode) stateNode.textContent = label;
+  if (dotNode) dotNode.className = `status-dot ${phase}`;
+  if (nameNode) nameNode.textContent = bleDevice ? bleDevice.name : '尚未选择设备';
+  if (guideNode) guideNode.textContent = uploadInProgress ? '图片正在传输，请保持页面与设备连接。' : connected ? '选择图片并确认预览，准备好后手动上传。' : bleDevice ? '连接已断开，可点击“重连”。' : '先连接墨水屏，然后选择图片并预览。';
 }
 
 function disconnect() {
@@ -494,12 +522,8 @@ async function connect() {
   }
 
   if (appVersion < 0x16) {
-    const oldURL = "https://tsl0922.github.io/EPD-nRF5/v1.5";
-    alert("!!!注意!!!\n当前固件版本过低，可能无法正常使用部分功能，建议升级到最新版本。");
-    if (confirm('是否访问旧版本上位机？')) location.href = oldURL;
-    setTimeout(() => {
-      addLog(`如遇到问题，可访问旧版本上位机: ${oldURL}`);
-    }, 500);
+    addLog('固件版本较低，本地网页可能无法完整支持；请先核对设备兼容性。');
+    setStatus('设备固件版本较低，请核对后再上传');
   }
 
   try {
@@ -524,7 +548,7 @@ async function connect() {
 }
 
 function setStatus(statusText) {
-  document.getElementById("status").innerHTML = statusText;
+  document.getElementById("status").textContent = statusText;
 }
 
 function addLog(logTXT, action = '') {
@@ -576,6 +600,8 @@ function setCanvasTitle(title) {
 
 function updateImage() {
   const imageFile = document.getElementById('imageFile');
+  if (uploadState) uploadState.setImage(false);
+  updateButtonStatus();
   if (imageFile.files.length == 0) {
     fillCanvas('white');
     return;
@@ -588,11 +614,19 @@ function updateImage() {
       if (cropManager.isCropMode()) cropManager.exitCropMode();
       ctx.drawImage(image, 0, 0, image.width, image.height, 0, 0, canvas.width, canvas.height);
       convertDithering();
+      if (uploadState) uploadState.setImage(true);
+      setStatus('图片已准备好，请检查预览');
+      updateButtonStatus();
     } else {
-      alert(`图片宽高比例与画布不匹配，将进入裁剪模式。\n请放大图片后移动图片使其充满画布, 再点击"完成"按钮。`);
-      paintManager.setActiveTool(null, '');
+      setStatus('图片比例不同，请在预览区完成裁剪');
       cropManager.initializeCrop();
     }
+  };
+  image.onerror = function () {
+    URL.revokeObjectURL(this.src);
+    setStatus('图片无法解码，请重新选择文件');
+    if (uploadState) uploadState.setImage(false);
+    updateButtonStatus();
   };
   image.src = URL.createObjectURL(imageFile.files[0]);
 }
@@ -603,6 +637,8 @@ function updateCanvasSize() {
 
   canvas.width = selectedSize.width;
   canvas.height = selectedSize.height;
+  const resolution = document.getElementById('resolutionLabel');
+  if (resolution) resolution.textContent = `${selectedSize.width} × ${selectedSize.height}`;
 
   updateImage();
 }
@@ -610,6 +646,10 @@ function updateCanvasSize() {
 function updateDitcherOptions() {
   const epdDriverSelect = document.getElementById('epddriver');
   const selectedOption = epdDriverSelect.options[epdDriverSelect.selectedIndex];
+  if (!selectedOption) {
+    setStatus('设备驱动未被当前网页识别，请勿上传');
+    return;
+  }
   const colorMode = selectedOption.getAttribute('data-color');
   const canvasSize = selectedOption.getAttribute('data-size');
 
@@ -684,7 +724,16 @@ function convertDithering() {
 }
 
 function applyDither() {
-  cropManager.finishCrop(() => convertDithering());
+  const imageFile = document.getElementById('imageFile');
+  if (!imageFile.files || imageFile.files.length === 0) return;
+  if (uploadState) uploadState.setImage(false);
+  updateButtonStatus();
+  cropManager.finishCrop(() => {
+    convertDithering();
+    if (uploadState) uploadState.setImage(true);
+    setStatus('图片已准备好，请检查预览');
+    updateButtonStatus();
+  });
 }
 
 function initEventHandlers() {
@@ -726,9 +775,7 @@ document.body.onload = () => {
   paintManager = new PaintManager(canvas, ctx);
   cropManager = new CropManager(canvas, ctx, paintManager);
 
-  paintManager.initPaintTools();
   cropManager.initCropTools();
   initEventHandlers();
   updateButtonStatus();
-  checkDebugMode();
 }

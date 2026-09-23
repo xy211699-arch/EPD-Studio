@@ -61,6 +61,19 @@ test('middle failed packet prevents later packets', async () => {
   assert.equal(calls, 2);
 });
 
+test('invalid transfer sizes stop before any image packet', async () => {
+  for (const [mtu, interval] of [[2, 50], [0, 50], ['abc', 50], [20, -1], [20, 'abc']]) {
+    const { context, node } = makeHarness();
+    node('mtusize').value = mtu;
+    node('interleavedcount').value = interval;
+    let calls = 0;
+    context.fakeWrite = async () => { calls++; return true; };
+    vm.runInContext('write = fakeWrite', context);
+    await assert.rejects(context.writeImage(Uint8Array.of(1, 2)), /MTU|确认间隔/);
+    assert.equal(calls, 0);
+  }
+});
+
 test('failed initialization prevents image writes and refresh', async () => {
   const { context } = makeHarness();
   const commands = [];
