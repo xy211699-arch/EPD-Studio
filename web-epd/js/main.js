@@ -5,6 +5,8 @@ let canvas, ctx, textDecoder;
 let paintManager, cropManager;
 let rleSupport;
 let uploadInProgress = false;
+let connectionInProgress = false;
+const uploadState = globalThis.EpdUploadState ? globalThis.EpdUploadState.createUploadState() : null;
 
 const EpdCmd = {
   SET_PINS: 0x00,
@@ -78,7 +80,6 @@ function resetVariables() {
   epdCharacteristic = null;
   msgIndex = 0;
   rleSupport = false;
-  document.getElementById("log").value = '';
 }
 
 async function write(cmd, data, withResponse = true) {
@@ -251,6 +252,7 @@ async function sendimg() {
   }
 
   uploadInProgress = true;
+  if (uploadState) uploadState.setStatus('sending');
   startTime = new Date().getTime();
   const status = document.getElementById("status");
   status.parentElement.style.display = "block";
@@ -302,6 +304,7 @@ async function sendimg() {
     return { ok: false, error: message };
   } finally {
     uploadInProgress = false;
+    if (uploadState) uploadState.setStatus(gattServer && gattServer.connected ? 'connected' : 'error');
     updateButtonStatus();
   }
 }
@@ -352,31 +355,40 @@ function downloadDataArray() {
 }
 
 function updateButtonStatus(forceDisabled = false) {
-  const connected = gattServer != null && gattServer.connected;
-  const status = forceDisabled ? 'disabled' : (connected ? null : 'disabled');
-  document.getElementById("reconnectbutton").disabled = (gattServer == null || gattServer.connected) ? 'disabled' : null;
-  document.getElementById("sendcmdbutton").disabled = status;
-  document.getElementById("calendarmodebutton").disabled = status;
-  document.getElementById("clockmodebutton").disabled = status;
-  document.getElementById("clearscreenbutton").disabled = status;
-  document.getElementById("sendimgbutton").disabled = status;
-  document.getElementById("setDriverbutton").disabled = status;
+  const connected = Boolean(gattServer && gattServer.connected);
+  const imageInput = document.getElementById('imageFile');
+  const imageReady = uploadState ? uploadState.hasImage : Boolean(imageInput && imageInput.files && imageInput.files.length);
+  const reconnect = document.getElementById('reconnectbutton');
+  if (reconnect) reconnect.disabled = !bleDevice || connected || connectionInProgress || uploadInProgress;
+  const send = document.getElementById('sendimgbutton');
+  if (send) send.disabled = !connected || !imageReady || forceDisabled || connectionInProgress || uploadInProgress;
+  for (const id of ['sendcmdbutton', 'calendarmodebutton', 'clockmodebutton', 'clearscreenbutton', 'setDriverbutton']) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = !connected || forceDisabled || connectionInProgress || uploadInProgress;
+  }
 }
 
 function disconnect() {
-  updateButtonStatus();
   resetVariables();
+  if (uploadState) uploadState.setStatus('error');
   addLog('已断开连接.');
+  setStatus('设备已断开，可点击“重连”');
   document.getElementById("connectbutton").innerHTML = '连接';
+  updateButtonStatus();
 }
 
 async function preConnect() {
+  if (connectionInProgress || uploadInProgress) return false;
   if (gattServer != null && gattServer.connected) {
     if (bleDevice != null && bleDevice.gatt.connected) {
       bleDevice.gatt.disconnect();
     }
+    return true;
   }
   else {
+    connectionInProgress = true;
+    if (uploadState) uploadState.setStatus('connecting');
+    updateButtonStatus();
     resetVariables();
     try {
       bleDevice = await navigator.bluetooth.requestDevice({
@@ -386,24 +398,41 @@ async function preConnect() {
     } catch (e) {
       console.error(e);
       if (e.message) addLog("requestDevice: " + e.message);
-      addLog("请检查蓝牙是否已开启，且使用的浏览器支持蓝牙！建议使用以下浏览器：");
-      addLog("• 电脑: Chrome/Edge");
-      addLog("• Android: Chrome/Edge");
-      addLog("• iOS: Bluefy 浏览器");
-      return;
+      setStatus(e.name === 'NotFoundError' ? '已取消设备选择' : '蓝牙设备选择失败，请检查 Edge 与蓝牙状态');
+      if (uploadState) uploadState.setStatus('error');
+      connectionInProgress = false;
+      updateButtonStatus();
+      return false;
     }
 
+    if (uploadState) uploadState.setDevice(bleDevice);
     await bleDevice.addEventListener('gattserverdisconnected', disconnect);
-    setTimeout(async function () { await connect(); }, 300);
+    setTimeout(async function () {
+      try { await connect(); }
+      finally {
+        connectionInProgress = false;
+        updateButtonStatus();
+      }
+    }, 300);
+    return true;
   }
 }
 
 async function reConnect() {
-  if (bleDevice != null && bleDevice.gatt.connected)
-    bleDevice.gatt.disconnect();
+  if (bleDevice == null || connectionInProgress || uploadInProgress || bleDevice.gatt.connected) return false;
+  connectionInProgress = true;
+  if (uploadState) uploadState.setStatus('connecting');
+  updateButtonStatus();
   resetVariables();
   addLog("正在重连");
-  setTimeout(async function () { await connect(); }, 300);
+  setTimeout(async function () {
+    try { await connect(); }
+    finally {
+      connectionInProgress = false;
+      updateButtonStatus();
+    }
+  }, 300);
+  return true;
 }
 
 function handleNotify(value, idx) {
@@ -483,9 +512,14 @@ async function connect() {
     if (e.message) addLog("startNotifications: " + e.message);
   }
 
-  await write(EpdCmd.INIT);
+  if (await write(EpdCmd.INIT) !== true) {
+    addLog('连接初始化写入失败');
+    disconnect();
+    return;
+  }
 
   document.getElementById("connectbutton").innerHTML = '断开';
+  if (uploadState) uploadState.setStatus('connected');
   updateButtonStatus();
 }
 
