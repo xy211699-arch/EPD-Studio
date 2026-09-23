@@ -267,9 +267,9 @@ class PaintManager {
     if (this.currentTool === 'brush' || this.currentTool === 'eraser') {
       // Check if mouse is within canvas bounds
       const rect = this.canvas.getBoundingClientRect();
-      const isInCanvas = e.clientX >= rect.left && 
-                         e.clientX <= rect.right && 
-                         e.clientY >= rect.top && 
+      const isInCanvas = e.clientX >= rect.left &&
+                         e.clientX <= rect.right &&
+                         e.clientY >= rect.top &&
                          e.clientY <= rect.bottom;
 
       if (isInCanvas) {
