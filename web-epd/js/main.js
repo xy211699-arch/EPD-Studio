@@ -4,6 +4,7 @@ let startTime, msgIndex, appVersion;
 let canvas, ctx, textDecoder;
 let paintManager, cropManager;
 let rleSupport;
+let uploadInProgress = false;
 
 const EpdCmd = {
   SET_PINS: 0x00,
@@ -141,12 +142,16 @@ async function writeImage(data, step = 'bw') {
       ,
       ...chunk,
     ];
+    let accepted;
     if (noReplyCount > 0) {
-      await write(EpdCmd.WRITE_IMG, payload, false);
+      accepted = await write(EpdCmd.WRITE_IMG, payload, false);
       noReplyCount--;
     } else {
-      await write(EpdCmd.WRITE_IMG, payload, true);
+      accepted = await write(EpdCmd.WRITE_IMG, payload, true);
       noReplyCount = interleavedCount;
+    }
+    if (accepted !== true) {
+      throw new Error(`WRITE_IMG ${step} ${i + 1}/${totalChunks} 写入失败`);
     }
   }
 }
@@ -218,9 +223,20 @@ function convertUC8159(blackWhiteData, redWhiteData) {
 }
 
 async function sendimg() {
+  if (uploadInProgress) return { ok: false, error: '已有图片正在传输' };
   if (cropManager.isCropMode()) {
     alert("请先完成图片裁剪！发送已取消。");
-    return;
+    return { ok: false, error: '图片裁剪尚未完成' };
+  }
+
+  const imageFile = document.getElementById('imageFile');
+  if (!imageFile.files || imageFile.files.length === 0) {
+    setStatus('请先选择图片');
+    return { ok: false, error: '未选择图片' };
+  }
+  if (!gattServer || !gattServer.connected || !epdCharacteristic) {
+    setStatus('设备未连接，请先连接或重连');
+    return { ok: false, error: '设备未连接' };
   }
 
   const canvasSize = document.getElementById('canvasSize').value;
@@ -228,59 +244,66 @@ async function sendimg() {
   const epdDriverSelect = document.getElementById('epddriver');
   const selectedOption = epdDriverSelect.options[epdDriverSelect.selectedIndex];
 
-  if (selectedOption.getAttribute('data-size') !== canvasSize) {
-    if (!confirm("警告：画布尺寸和驱动不匹配，是否继续？")) return;
-  }
-  if (selectedOption.getAttribute('data-color') !== ditherMode) {
-    if (!confirm("警告：颜色模式和驱动不匹配，是否继续？")) return;
+  if (!selectedOption || selectedOption.getAttribute('data-size') !== canvasSize ||
+      selectedOption.getAttribute('data-color') !== ditherMode) {
+    setStatus('画布尺寸或颜色模式与设备驱动不匹配，请核对后再上传');
+    return { ok: false, error: '图片设置与设备驱动不匹配' };
   }
 
+  uploadInProgress = true;
   startTime = new Date().getTime();
   const status = document.getElementById("status");
   status.parentElement.style.display = "block";
-
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const processedData = processImageData(imageData, ditherMode);
-
   updateButtonStatus(true);
+  try {
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const processedData = processImageData(imageData, ditherMode);
 
-  await write(EpdCmd.INIT);
-
-  if (ditherMode === 'threeColor') {
-    const halfLength = Math.floor(processedData.length / 2);
-    const blackWhiteData = processedData.slice(0, halfLength);
-    const redWhiteData = processedData.slice(halfLength);
-    if (['08', '09', '0e', '0f'].includes(epdDriverSelect.value)) {
-      await writeImage(convertUC8159(blackWhiteData, redWhiteData), 'bw');
-    } else {
-      await writeImage(blackWhiteData, 'bw');
-      await writeImage(redWhiteData, 'red');
+    if (await write(EpdCmd.INIT) !== true) {
+      throw new Error('INIT 写入失败');
     }
-  } else if (ditherMode === 'blackWhiteColor') {
-    if (['08', '09', '0e', '0f'].includes(epdDriverSelect.value)) {
-      const emptyData = new Uint8Array(processedData.length).fill(0xFF);
-      await writeImage(convertUC8159(processedData, emptyData), 'bw');
-    } else {
+
+    if (ditherMode === 'threeColor') {
+      const halfLength = Math.floor(processedData.length / 2);
+      const blackWhiteData = processedData.slice(0, halfLength);
+      const redWhiteData = processedData.slice(halfLength);
+      if (['08', '09', '0e', '0f'].includes(epdDriverSelect.value)) {
+        await writeImage(convertUC8159(blackWhiteData, redWhiteData), 'bw');
+      } else {
+        await writeImage(blackWhiteData, 'bw');
+        await writeImage(redWhiteData, 'red');
+      }
+    } else if (ditherMode === 'blackWhiteColor') {
+      if (['08', '09', '0e', '0f'].includes(epdDriverSelect.value)) {
+        const emptyData = new Uint8Array(processedData.length).fill(0xFF);
+        await writeImage(convertUC8159(processedData, emptyData), 'bw');
+      } else {
+        await writeImage(processedData, 'bw');
+      }
+    } else if (ditherMode === 'fourColor' || ditherMode === 'sixColor') {
       await writeImage(processedData, 'bw');
+    } else {
+      throw new Error('当前固件不支持此颜色模式');
     }
-  } else if (ditherMode === 'fourColor' || ditherMode === 'sixColor') {
-    await writeImage(processedData, 'bw');
-  } else {
-    addLog("当前固件不支持此颜色模式。");
+
+    if (await write(EpdCmd.REFRESH) !== true) {
+      throw new Error('REFRESH 写入失败');
+    }
+
+    const sendTime = (new Date().getTime() - startTime) / 1000.0;
+    const message = `传输命令已完成，请检查屏幕。耗时: ${sendTime}s`;
+    addLog(message);
+    setStatus(message);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    addLog(`上传失败：${message}`);
+    setStatus(`上传失败：${message}`);
+    return { ok: false, error: message };
+  } finally {
+    uploadInProgress = false;
     updateButtonStatus();
-    return;
   }
-
-  await write(EpdCmd.REFRESH);
-  updateButtonStatus();
-
-  const sendTime = (new Date().getTime() - startTime) / 1000.0;
-  addLog(`发送完成！耗时: ${sendTime}s`);
-  setStatus(`发送完成！耗时: ${sendTime}s`);
-  addLog("屏幕刷新完成前请不要操作。");
-  setTimeout(() => {
-    status.parentElement.style.display = "none";
-  }, 5000);
 }
 
 function downloadDataArray() {
