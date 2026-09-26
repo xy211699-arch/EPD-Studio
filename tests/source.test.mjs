@@ -35,6 +35,10 @@ test('source snapshots and legacy favicon remain public with provenance', () => 
   assert.ok(statSync(join(repository, 'assets', 'epd_ble_test.png')).size > 0);
 });
 
+test('published tree excludes internal planning documents', () => {
+  assert.equal(existsSync(join(repository, 'docs', 'superpowers')), false);
+});
+
 test('local snapshot contains all browser assets with provenance', () => {
   for (const file of files) assert.ok(statSync(join(root, file)).size > 0, file);
   const source = readFileSync(join(repository, 'reference', 'README.md'), 'utf8');
