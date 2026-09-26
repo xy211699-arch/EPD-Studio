@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'app');
-const files = ['index.html', 'css/main.css', 'js/dithering.js', 'js/rle.js', 'js/paint.js', 'js/crop.js', 'js/main.js', 'favicon.png'];
+const repository = join(root, '..');
+const files = ['index.html', 'css/main.css', 'js/dithering.js', 'js/rle.js', 'js/paint.js', 'js/crop.js', 'js/main.js'];
 
 test('published application has a dedicated app directory with descriptive script names', () => {
-  const repository = join(root, '..');
   const app = join(repository, 'app');
   for (const path of ['index.html', 'launch.py', 'js/dashboard.js', 'js/quota.js', 'js/tabs.js', 'js/upload.js']) {
     assert.ok(existsSync(join(app, path)), path);
@@ -17,9 +18,26 @@ test('published application has a dedicated app directory with descriptive scrip
   if (existsSync(oldDirectory)) assert.deepEqual(readdirSync(oldDirectory), []);
 });
 
+test('README uses the supplied logo while the page keeps the original EPD favicon', () => {
+  const logo = readFileSync(join(repository, 'assets', 'logo.png'));
+  assert.equal(createHash('sha256').update(logo).digest('hex').toUpperCase(), 'AC00D18BDAD3B4A7594E98DA2C112B7390AF0DA20182F56CA83A266A0709B8C8');
+  const readme = readFileSync(join(repository, 'README.md'), 'utf8');
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  assert.ok(readme.includes('src="assets/logo.png"'));
+  assert.ok(html.includes('href="favicon.svg"'));
+  assert.equal(createHash('sha256').update(readFileSync(join(root, 'favicon.svg'))).digest('hex').toUpperCase(), '4F88EB3201A3BBC3911D7B863542F98CBEDFDAA79FCD6144D8C78BB9FA94A9EE');
+});
+
+test('source snapshots and legacy favicon remain public with provenance', () => {
+  for (const path of ['epdiy/manifest.txt', 'epd-nrf5/manifest.txt', 'legacy/favicon.png', 'README.md']) {
+    assert.ok(statSync(join(repository, 'reference', path)).size > 0, path);
+  }
+  assert.ok(statSync(join(repository, 'assets', 'epd_ble_test.png')).size > 0);
+});
+
 test('local snapshot contains all browser assets with provenance', () => {
   for (const file of files) assert.ok(statSync(join(root, file)).size > 0, file);
-  const source = readFileSync(join(root, 'SOURCE.md'), 'utf8');
+  const source = readFileSync(join(repository, 'reference', 'README.md'), 'utf8');
   for (const file of files) assert.ok(source.includes(file), `${file} provenance`);
 });
 
@@ -33,12 +51,4 @@ test('page loads local scripts in original dependency order and no remote analyt
     previous = index;
   }
   assert.ok(!html.includes('hm.baidu.com'));
-});
-
-test('page and repository README use the current EPD icon', () => {
-  const html = readFileSync(join(root, 'index.html'), 'utf8');
-  const readme = readFileSync(join(root, '..', 'README.md'), 'utf8');
-  assert.ok(statSync(join(root, 'epd-icon.svg')).size > 0);
-  assert.ok(html.includes('href="epd-icon.svg"'));
-  assert.ok(readme.includes('src="web-epd/epd-icon.svg"'));
 });

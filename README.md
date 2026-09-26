@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web-epd/epd-icon.svg" alt="EPD Studio" width="96">
+  <img src="assets/logo.png" alt="EPD Studio" width="320">
 </p>
 
 <h1 align="center">EPD Studio</h1>
@@ -38,7 +38,7 @@
 python app\launch.py
 ```
 
-启动脚本会打开本地网页。在 Edge 的蓝牙选择器中选择 `NRF-EPD-XXXX`，连接成功后即可使用。
+启动脚本会打开本地网页。在 Edge 的蓝牙选择器中选择 `NRF-EPD-XXXX`，连接成功后即可使用。详细操作与故障处理见 [使用说明](USAGE.md)。
 
 ## 🧭 使用流程
 
