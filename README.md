@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web-epd/favicon.png" alt="EPD Studio" width="96">
+  <img src="web-epd/epd-icon.svg" alt="EPD Studio" width="96">
 </p>
 
 <h1 align="center">EPD Studio</h1>

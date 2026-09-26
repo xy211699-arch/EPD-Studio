@@ -24,3 +24,11 @@ test('page loads local scripts in original dependency order and no remote analyt
   }
   assert.ok(!html.includes('hm.baidu.com'));
 });
+
+test('page and repository README use the current EPD icon', () => {
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  const readme = readFileSync(join(root, '..', 'README.md'), 'utf8');
+  assert.ok(statSync(join(root, 'epd-icon.svg')).size > 0);
+  assert.ok(html.includes('href="epd-icon.svg"'));
+  assert.ok(readme.includes('src="web-epd/epd-icon.svg"'));
+});
