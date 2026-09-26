@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const modulePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'view-tabs.js');
+const modulePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'tabs.js');
 
 function makeElement() {
   const listeners = new Map();

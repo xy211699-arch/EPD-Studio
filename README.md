@@ -35,7 +35,7 @@
 需要 Windows、Microsoft Edge、Python 3 和可用的蓝牙适配器。下载项目后，在仓库根目录运行：
 
 ```powershell
-python web-epd\launch.py
+python app\launch.py
 ```
 
 启动脚本会打开本地网页。在 Edge 的蓝牙选择器中选择 `NRF-EPD-XXXX`，连接成功后即可使用。

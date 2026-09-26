@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'quota-state.js');
+const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'quota.js');
 
 function loadQuota(extra = {}) {
   const sandbox = { ...extra };

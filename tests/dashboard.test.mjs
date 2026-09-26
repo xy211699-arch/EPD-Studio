@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'static-dashboard.js');
-const mainScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'main.js');
+const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'dashboard.js');
+const mainScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'main.js');
 
 function loadDashboard(extra = {}) {
   const sandbox = { ...extra };

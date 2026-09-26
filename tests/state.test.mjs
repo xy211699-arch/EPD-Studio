@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const statePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'upload-state.js');
+const statePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'upload.js');
 
 function freshState() {
   assert.ok(existsSync(statePath), 'upload-state module must exist');

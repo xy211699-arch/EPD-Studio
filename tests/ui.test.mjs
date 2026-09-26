@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'app');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
 
@@ -16,8 +16,8 @@ test('single upload workspace has the required controls but no hardware commands
   for (const id of ['setDriverbutton', 'sendcmdbutton', 'calendarmodebutton', 'clockmodebutton', 'clearscreenbutton', 'brush-mode', 'text-mode', 'debug-toggle']) {
     assert.ok(!ids.has(id), `${id} must not be exposed`);
   }
-  assert.ok(html.includes('js/upload-state.js'));
-  assert.ok(html.indexOf('js/upload-state.js') < html.indexOf('js/main.js'));
+  assert.ok(html.includes('js/upload.js'));
+  assert.ok(html.indexOf('js/upload.js') < html.indexOf('js/main.js'));
   assert.ok(html.includes('css/app.css'));
 });
 
@@ -36,7 +36,7 @@ test('two upload tabs keep existing controls and show only the file view initial
   }
   assert.match(html, /<main\b(?=[^>]*\bid="view-file")(?=[^>]*\brole="tabpanel")(?=[^>]*\baria-labelledby="tab-file")[^>]*>/);
   assert.match(html, /<main\b(?=[^>]*\bid="view-custom")(?=[^>]*\brole="tabpanel")(?=[^>]*\baria-labelledby="tab-custom")(?=[^>]*\bhidden(?:\s|>))[^>]*>/);
-  assert.ok(html.indexOf('js/view-tabs.js') < html.indexOf('js/main.js'));
+  assert.ok(html.indexOf('js/tabs.js') < html.indexOf('js/main.js'));
   assert.match(html, /<nav\b[^>]*id="viewTabs"[^>]*class="view-tabs"/);
   assert.match(html, /id="tab-file"[^>]*>01&nbsp;&nbsp;Original<\/button>/);
   assert.match(html, /id="tab-custom"[^>]*>02&nbsp;&nbsp;Custom<\/button>/);
@@ -51,8 +51,8 @@ test('quota controls expose both account windows without exposing credentials', 
   for (const id of ['refreshQuotaButton', 'quotaStatusText', 'quotaUpdated', 'quotaFiveHour', 'quotaSevenDay', 'quotaTopValue']) {
     assert.ok(ids.has(id), `${id} missing`);
   }
-  assert.ok(html.includes('js/quota-state.js'));
-  assert.ok(html.indexOf('js/quota-state.js') < html.indexOf('js/main.js'));
+  assert.ok(html.includes('js/quota.js'));
+  assert.ok(html.indexOf('js/quota.js') < html.indexOf('js/main.js'));
   assert.ok(!html.includes('access_token'));
 });
 
@@ -91,7 +91,7 @@ test('browser initialization works without removed paint controls and never asks
     window: { location: { search: '', pathname: '/' } },
   };
   vm.createContext(sandbox);
-  for (const file of ['js/paint.js', 'js/crop.js', 'js/upload-state.js', 'js/view-tabs.js', 'js/quota-state.js', 'js/main.js']) {
+  for (const file of ['js/paint.js', 'js/crop.js', 'js/upload.js', 'js/tabs.js', 'js/quota.js', 'js/main.js']) {
     if (existsSync(join(root, file))) vm.runInContext(readFileSync(join(root, file), 'utf8'), sandbox);
   }
   assert.doesNotThrow(() => document.body.onload());

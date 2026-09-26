@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'main.js'), 'utf8');
-const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'), 'utf8');
+const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'main.js'), 'utf8');
+const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'index.html'), 'utf8');
 
 function harness({ failService = false, failNotifications = false, notifyOnStart = false } = {}) {
   const nodes = new Map();

@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'app');
 const files = ['index.html', 'css/main.css', 'js/dithering.js', 'js/rle.js', 'js/paint.js', 'js/crop.js', 'js/main.js', 'favicon.png'];
+
+test('published application has a dedicated app directory with descriptive script names', () => {
+  const repository = join(root, '..');
+  const app = join(repository, 'app');
+  for (const path of ['index.html', 'launch.py', 'js/dashboard.js', 'js/quota.js', 'js/tabs.js', 'js/upload.js']) {
+    assert.ok(existsSync(join(app, path)), path);
+  }
+  const oldDirectory = join(repository, 'web-epd');
+  if (existsSync(oldDirectory)) assert.deepEqual(readdirSync(oldDirectory), []);
+});
 
 test('local snapshot contains all browser assets with provenance', () => {
   for (const file of files) assert.ok(statSync(join(root, file)).size > 0, file);

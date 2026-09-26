@@ -16,12 +16,12 @@ jobs:
         with:
           node-version: '20.x'
       - name: Python tests
-        run: python -m unittest discover -s web-epd/tests -p 'test_*.py' -v
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Node tests
-        run: node --test web-epd/tests/*.test.mjs
+        run: node --test tests/*.test.mjs
       - name: Syntax checks
         shell: pwsh
         run: |
-          python -m compileall -q web-epd
-          node --check web-epd/js/main.js
-          node --check web-epd/js/static-dashboard.js
+          python -m compileall -q app
+          node --check app/js/main.js
+          node --check app/js/dashboard.js

@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1] / "app"
 SPEC = importlib.util.spec_from_file_location("epd_server", ROOT / "server.py")
 server_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(server_module)

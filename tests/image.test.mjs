@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const stateSource = readFileSync(join(root, 'js/upload-state.js'), 'utf8');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'app');
+const stateSource = readFileSync(join(root, 'js/upload.js'), 'utf8');
 const mainSource = readFileSync(join(root, 'js/main.js'), 'utf8');
 const cropSource = readFileSync(join(root, 'js/crop.js'), 'utf8');
 

@@ -5,20 +5,20 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
-const mainSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'main.js'), 'utf8');
-const rleSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'js', 'rle.js'), 'utf8');
-const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'), 'utf8');
+const mainSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'main.js'), 'utf8');
+const rleSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js', 'rle.js'), 'utf8');
+const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'index.html'), 'utf8');
 const INIT = 0x01;
 const REFRESH = 0x05;
 const WRITE_IMG = 0x30;
 const SET_SLOT = 0x31;
-const jsRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'js');
+const jsRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'app', 'js');
 
 function customHarness(options = {}) {
   const app = makeHarness({ imageSelected: false, ...options });
   app.context.alert = () => {};
   app.context.ImageData = class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } };
-  for (const file of ['static-dashboard.js', 'dithering.js']) {
+  for (const file of ['dashboard.js', 'dithering.js']) {
     vm.runInContext(readFileSync(join(jsRoot, file), 'utf8'), app.context);
   }
   app.node('dashboardCanvas').getContext = () => ({ putImageData: (image) => { app.preview = image; } });
