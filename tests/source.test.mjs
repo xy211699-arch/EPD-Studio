@@ -18,31 +18,34 @@ test('published application has a dedicated app directory with descriptive scrip
   if (existsSync(oldDirectory)) assert.deepEqual(readdirSync(oldDirectory), []);
 });
 
-test('README uses the supplied logo while the page keeps the original EPD favicon', () => {
-  const logo = readFileSync(join(repository, 'assets', 'logo.png'));
+test('README uses the supplied root logo while the page keeps the original EPD favicon', () => {
+  const logo = readFileSync(join(repository, 'logo.png'));
   assert.equal(createHash('sha256').update(logo).digest('hex').toUpperCase(), 'AC00D18BDAD3B4A7594E98DA2C112B7390AF0DA20182F56CA83A266A0709B8C8');
   const readme = readFileSync(join(repository, 'README.md'), 'utf8');
   const html = readFileSync(join(root, 'index.html'), 'utf8');
-  assert.ok(readme.includes('src="assets/logo.png"'));
+  assert.ok(readme.includes('src="logo.png"'));
   assert.ok(html.includes('href="favicon.svg"'));
   assert.equal(createHash('sha256').update(readFileSync(join(root, 'favicon.svg'))).digest('hex').toUpperCase(), '4F88EB3201A3BBC3911D7B863542F98CBEDFDAA79FCD6144D8C78BB9FA94A9EE');
 });
 
-test('source snapshots and legacy favicon remain public with provenance', () => {
-  for (const path of ['epdiy/manifest.txt', 'epd-nrf5/manifest.txt', 'legacy/favicon.png', 'README.md']) {
-    assert.ok(statSync(join(repository, 'reference', path)).size > 0, path);
+test('published tree omits optional snapshots, sample image and CI workflow', () => {
+  for (const path of ['reference', 'assets', '.github']) {
+    assert.equal(existsSync(join(repository, path)), false, path);
   }
-  assert.ok(statSync(join(repository, 'assets', 'epd_ble_test.png')).size > 0);
+  const readme = readFileSync(join(repository, 'README.md'), 'utf8');
+  const usage = readFileSync(join(repository, 'USAGE.md'), 'utf8');
+  assert.ok(!readme.includes('actions/workflows'));
+  assert.ok(!readme.includes('reference/'));
+  assert.ok(!usage.includes('assets/'));
+  assert.ok(!usage.includes('reference/'));
 });
 
 test('published tree excludes internal planning documents', () => {
   assert.equal(existsSync(join(repository, 'docs', 'superpowers')), false);
 });
 
-test('local snapshot contains all browser assets with provenance', () => {
+test('local application contains all browser assets', () => {
   for (const file of files) assert.ok(statSync(join(root, file)).size > 0, file);
-  const source = readFileSync(join(repository, 'reference', 'README.md'), 'utf8');
-  for (const file of files) assert.ok(source.includes(file), `${file} provenance`);
 });
 
 test('page loads local scripts in original dependency order and no remote analytics', () => {

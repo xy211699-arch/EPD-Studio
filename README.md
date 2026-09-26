@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="EPD Studio" width="320">
+  <img src="logo.png" alt="EPD Studio" width="320">
 </p>
 
 <h1 align="center">EPD Studio</h1>
@@ -7,7 +7,6 @@
 <p align="center">墨水屏本地自定义看板与图片上传工具</p>
 
 <p align="center">
-  <a href="https://github.com/xy211699-arch/EPD-Studio/actions/workflows/ci.yml"><img src="https://github.com/xy211699-arch/EPD-Studio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white" alt="Windows">
   <img src="https://img.shields.io/badge/browser-Microsoft%20Edge-0A66C2?logo=microsoftedge&logoColor=white" alt="Microsoft Edge">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 License">
@@ -55,4 +54,4 @@ python app\launch.py
 
 ## 📚 来源与许可
 
-本项目按 [GPL-3.0](LICENSE) 发布。蓝牙协议、图片传输和设备交互实现参考 [EPD-nRF5](https://github.com/tsl0922/EPD-nRF5)；公开参考快照和来源说明见 [`reference/`](reference/) 与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。
+本项目按 [GPL-3.0](LICENSE) 发布。蓝牙协议、图片传输和设备交互实现参考 [EPD-nRF5](https://github.com/tsl0922/EPD-nRF5)；第三方来源说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
