@@ -8,7 +8,13 @@ let uploadInProgress = false;
 let connectionInProgress = false;
 let disconnecting = false;
 let deviceConfig = null;
+let deviceSlots = null;
+let batteryMv = null;
+let configNotificationSeen = false;
 let imageRevision = 0;
+let customPixels = null;
+let quotaState = globalThis.EpdQuota ? globalThis.EpdQuota.emptyQuota() : { status: 'unavailable', five_hour: null, seven_day: null };
+let quotaController = null;
 const uploadState = globalThis.EpdUploadState ? globalThis.EpdUploadState.createUploadState() : null;
 
 const EpdCmd = {
@@ -23,6 +29,7 @@ const EpdCmd = {
   SET_TIME: 0x20,
 
   WRITE_IMG: 0x30, // v1.6
+  SET_SLOT: 0x31,
 
   SET_CONFIG: 0x90,
   SYS_RESET: 0x91,
@@ -84,11 +91,46 @@ function resetVariables() {
   msgIndex = 0;
   rleSupport = false;
   deviceConfig = null;
+  deviceSlots = null;
+  batteryMv = null;
+  configNotificationSeen = false;
+}
+
+// Match the official epdiy.cn battery conversion: the device reports millivolts.
+function batteryPercentFromMv(millivolts) {
+  const scaled = millivolts * 2047 / 3600;
+  if (scaled > 1705) return 100;
+  if (scaled > 1584) return 28 + Math.floor((scaled - 1584) * 72 / 121);
+  if (scaled > 1360) return 4 + Math.floor((scaled - 1360) * 24 / 224);
+  if (scaled > 1136) return Math.floor((scaled - 1136) * 4 / 224);
+  return 0;
+}
+
+function renderBatteryStatus() {
+  const statusNode = document.getElementById('batteryStatus');
+  const valueNode = document.getElementById('batteryValue');
+  if (!statusNode || !valueNode) return;
+  const connected = Boolean(gattServer && gattServer.connected);
+  if (!connected || !Number.isFinite(batteryMv) || batteryMv < 0) {
+    statusNode.hidden = true;
+    valueNode.textContent = '--';
+    return;
+  }
+  const percent = batteryPercentFromMv(batteryMv);
+  valueNode.textContent = `${percent}% / ${(batteryMv / 1000).toFixed(2)}V`;
+  statusNode.hidden = false;
+}
+
+function hasValidCurrentSlot() {
+  if (!deviceSlots) return false;
+  const { count, selected } = deviceSlots;
+  return Number.isSafeInteger(count) && count >= 0 &&
+    (count === 0 || (Number.isInteger(selected) && selected >= 0 && selected < count && selected <= 0xff));
 }
 
 async function write(cmd, data, withResponse = true) {
-  if (!epdCharacteristic) {
-    addLog("服务不可用，请检查蓝牙连接");
+  if (!epdCharacteristic || !gattServer || !gattServer.connected) {
+    addLog("服务不可用，请检查蓝牙连接。");
     return false;
   }
   let payload = [cmd];
@@ -105,48 +147,51 @@ async function write(cmd, data, withResponse = true) {
       await epdCharacteristic.writeValueWithoutResponse(Uint8Array.from(payload));
   } catch (e) {
     console.error(e);
-    if (e.message) addLog("write: " + e.message);
+    if (e.message) addLog("写入失败: " + e.message);
     return false;
   }
   return true;
 }
 
-async function writeImage(data, step = 'bw') {
+function getTransferSettings() {
   const mtu = Number(document.getElementById('mtusize').value);
   const interleavedCount = Number(document.getElementById('interleavedcount').value);
   if (!Number.isInteger(mtu) || mtu < 3 || mtu > 255) {
-    throw new Error('MTU 必须是 3 至 255 的整数');
+    throw new Error('MTU must be an integer from 3 to 255');
   }
   if (!Number.isInteger(interleavedCount) || interleavedCount < 0 || interleavedCount > 500) {
-    throw new Error('确认间隔必须是 0 至 500 的整数');
+    throw new Error('Confirm interval must be an integer from 0 to 500');
   }
-  const chunkSize = mtu - 2;
+  return { chunkSize: mtu - 2, interleavedCount, rleSupported: rleSupport === true };
+}
+
+async function writeImage(data, step = 'bw', settings = getTransferSettings()) {
+  const { chunkSize, interleavedCount, rleSupported } = settings;
   let noReplyCount = interleavedCount;
-  let totalRleLength = 0;
-  const stepText = step === 'bw' ? '数据块' : '红色块';
+  const stepText = step === 'bw' ? '黑白' : '红色';
 
   // Use RLE only when its complete encoded stream is smaller than the
   // original data. Each RLE chunk contains complete codes.
-  const rleChunks = rleSupport ? rleCompressMTU(data, chunkSize) : null;
+  // Every RLE code needs at least two bytes; smaller chunks must stay uncompressed.
+  const rleChunks = rleSupported && chunkSize >= 2 ? rleCompressMTU(data, chunkSize) : null;
   const rleLength = rleChunks ? rleChunks.reduce((total, chunk) => total + chunk.length, 0) : data.length;
-  const useRle = rleSupport && rleLength < data.length;
+  const useRle = rleSupported && rleLength < data.length;
   const totalChunks = useRle ? rleChunks.length : Math.ceil(data.length / chunkSize);
 
   for (let i = 0; i < totalChunks; i++) {
     let chunk;
     if (useRle) {
       chunk = rleChunks[i];
-      totalRleLength += chunk.length;
     } else {
       const off = i * chunkSize;
       chunk = data.slice(off, off + chunkSize);
     }
 
     const currentTime = (new Date().getTime() - startTime) / 1000.0;
-    setStatus(`${stepText}: ${i + 1}/${totalChunks}, 总用时: ${currentTime}s`);
+    setStatus(`${stepText}数据块: ${i + 1}/${totalChunks}，耗时: ${currentTime}s`);
 
     const payload = [
-      rleSupport
+      rleSupported
         ?
         (step === 'bw' ? 0x00 : 0x01) | (i === 0 ? 0x02 : 0x00) | (useRle ? 0x04 : 0x00)
         :
@@ -163,7 +208,7 @@ async function writeImage(data, step = 'bw') {
       noReplyCount = interleavedCount;
     }
     if (accepted !== true) {
-      throw new Error(`WRITE_IMG ${step} ${i + 1}/${totalChunks} 写入失败`);
+      throw new Error(`WRITE_IMG ${step} ${i + 1}/${totalChunks} write failed`);
     }
   }
 }
@@ -175,7 +220,7 @@ async function setDriver() {
 
 async function syncTime(mode) {
   if (mode === 2) {
-    if (!confirm('提醒：时钟模式目前使用全刷实现，此功能目前多用于修复老化屏残影问题，不建议长期开启，是否继续？')) return;
+    if (!confirm('时钟模式使用全刷，主要用于修复老化屏残影问题。是否继续？')) return;
   }
   const timestamp = new Date().getTime() / 1000;
   const data = new Uint8Array([
@@ -187,15 +232,15 @@ async function syncTime(mode) {
     mode
   ]);
   if (await write(EpdCmd.SET_TIME, data)) {
-    addLog("时间已同步！");
+    addLog("时间已同步。");
     addLog("屏幕刷新完成前请不要操作。");
   }
 }
 
 async function clearScreen() {
-  if (confirm('确认清除屏幕内容?')) {
+  if (confirm('确认清除屏幕内容？')) {
     await write(EpdCmd.CLEAR);
-    addLog("清屏指令已发送！");
+    addLog("清屏指令已发送。");
     addLog("屏幕刷新完成前请不要操作。");
   }
 }
@@ -234,43 +279,76 @@ function convertUC8159(blackWhiteData, redWhiteData) {
   return payloadData;
 }
 
-async function sendimg() {
-  if (uploadInProgress) return { ok: false, error: '已有图片正在传输' };
-  if (cropManager.isCropMode()) {
-    alert("请先完成图片裁剪！发送已取消。");
-    return { ok: false, error: '图片裁剪尚未完成' };
+function customDeviceReady() {
+  return deviceConfig && deviceConfig.driver === '16' &&
+    deviceConfig.size === '4.2_400_300' && deviceConfig.color === 'threeColor';
+}
+
+async function sendimg(source = 'file') {
+  if (uploadInProgress) return { ok: false, error: 'An upload is already in progress' };
+  if (source !== 'file' && source !== 'custom') {
+    setStatus('图片来源无效');
+    return { ok: false, error: 'Invalid image source' };
+  }
+  const isCustom = source === 'custom';
+  if (!isCustom && cropManager.isCropMode()) {
+    alert("Finish cropping before sending.");
+    return { ok: false, error: 'Crop is not finished' };
   }
 
   const imageFile = document.getElementById('imageFile');
-  if (!imageFile.files || imageFile.files.length === 0) {
+  if (!isCustom && (!imageFile.files || imageFile.files.length === 0)) {
     setStatus('请先选择图片');
-    return { ok: false, error: '未选择图片' };
+    return { ok: false, error: 'No image selected' };
   }
-  if (uploadState && !uploadState.hasImage) {
-    setStatus('图片尚未完成预览处理');
-    return { ok: false, error: '图片尚未就绪' };
+  if (!isCustom && uploadState && !uploadState.hasImage) {
+    setStatus('图片预览尚未准备好');
+    return { ok: false, error: 'Image is not ready' };
   }
   if (!gattServer || !gattServer.connected || !epdCharacteristic) {
-    setStatus('设备未连接，请先连接或重连');
-    return { ok: false, error: '设备未连接' };
+    setStatus('设备未连接，请先连接或重连。');
+    return { ok: false, error: 'Display is offline' };
   }
 
   if (!deviceConfig) {
-    setStatus('尚未收到设备配置，请勿上传');
-    return { ok: false, error: '设备配置尚未确认' };
+    setStatus('等待设备配置');
+    return { ok: false, error: 'Device configuration is not confirmed' };
   }
 
   const canvasSize = document.getElementById('canvasSize').value;
-  const ditherMode = document.getElementById('ditherMode').value;
+  const ditherMode = isCustom ? 'threeColor' : document.getElementById('ditherMode').value;
   const epdDriverSelect = document.getElementById('epddriver');
+  const driver = isCustom ? deviceConfig.driver : epdDriverSelect.value;
   const selectedOption = epdDriverSelect.options[epdDriverSelect.selectedIndex];
 
-  if (!selectedOption || epdDriverSelect.value !== deviceConfig.driver ||
+  if (isCustom && !customDeviceReady()) {
+    setStatus('自定义点阵需要 0x16 驱动、400 × 300 和三色模式。');
+    return { ok: false, error: 'Custom pixels do not match the device configuration' };
+  }
+  if (!isCustom && (!selectedOption || driver !== deviceConfig.driver ||
       selectedOption.getAttribute('data-size') !== canvasSize ||
       selectedOption.getAttribute('data-color') !== ditherMode ||
-      canvasSize !== deviceConfig.size || ditherMode !== deviceConfig.color) {
-    setStatus('画布尺寸或颜色模式与设备驱动不匹配，请核对后再上传');
-    return { ok: false, error: '图片设置与设备驱动不匹配' };
+      canvasSize !== deviceConfig.size || ditherMode !== deviceConfig.color)) {
+    setStatus('画布尺寸或颜色模式与设备不匹配。');
+    return { ok: false, error: 'Image settings do not match the device' };
+  }
+
+  if (deviceConfig.driver === '16' && (!hasValidCurrentSlot() || (isCustom && deviceSlots.count === 0))) {
+    setStatus('等待有效的设备槽位后才能上传。');
+    return { ok: false, error: 'Device slot information is not confirmed' };
+  }
+
+  if (deviceSlots && deviceSlots.count > 0) {
+    const { usedMask, selected } = deviceSlots;
+    if (!hasValidCurrentSlot()) {
+      setStatus('当前设备图片槽位无效。');
+      return { ok: false, error: 'The current device image slot is invalid' };
+    }
+    if ((usedMask & (1n << BigInt(selected))) !== 0n &&
+        !confirm(`槽位 ${selected + 1} 已有图片，上传会覆盖原图片。是否继续？`)) {
+      setStatus('上传已取消，原图片未被覆盖。');
+      return { ok: false, error: '用户取消覆盖图片槽位' };
+    }
   }
 
   uploadInProgress = true;
@@ -280,42 +358,59 @@ async function sendimg() {
   status.parentElement.style.display = "block";
   updateButtonStatus(true);
   try {
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const transferSettings = getTransferSettings();
+    if (isCustom && !globalThis.EpdStaticDashboard.validatePixels(customPixels)) {
+      throw new Error('Generate a valid 120000-pixel tri-color matrix first');
+    }
+    const imageData = isCustom ? EpdStaticDashboard.toImageData(customPixels) : ctx.getImageData(0, 0, canvas.width, canvas.height);
     const processedData = processImageData(imageData, ditherMode);
+    if (isCustom && (!(processedData instanceof Uint8Array) || processedData.length !== 30000)) {
+      throw new Error('Custom pixels must encode as two 15000-byte planes');
+    }
+
+    if (deviceSlots && deviceSlots.count > 0) {
+      const selectedSlot = deviceSlots.selected;
+      if (await write(EpdCmd.SET_SLOT, [0, selectedSlot]) !== true) {
+        throw new Error('SET_SLOT write failed');
+      }
+      // Treat an attempted upload as occupied until reconnect, even if a later packet fails.
+      if (deviceSlots) deviceSlots.usedMask |= 1n << BigInt(selectedSlot);
+    }
 
     if (await write(EpdCmd.INIT) !== true) {
-      throw new Error('INIT 写入失败');
+      throw new Error('INIT write failed');
     }
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     if (ditherMode === 'threeColor') {
       const halfLength = Math.floor(processedData.length / 2);
       const blackWhiteData = processedData.slice(0, halfLength);
       const redWhiteData = processedData.slice(halfLength);
-      if (['08', '09', '0e', '0f'].includes(epdDriverSelect.value)) {
-        await writeImage(convertUC8159(blackWhiteData, redWhiteData), 'bw');
+      if (['08', '09', '0e', '0f'].includes(driver)) {
+        await writeImage(convertUC8159(blackWhiteData, redWhiteData), 'bw', transferSettings);
       } else {
-        await writeImage(blackWhiteData, 'bw');
-        await writeImage(redWhiteData, 'red');
+        await writeImage(blackWhiteData, 'bw', transferSettings);
+        await writeImage(redWhiteData, 'red', transferSettings);
       }
     } else if (ditherMode === 'blackWhiteColor') {
-      if (['08', '09', '0e', '0f'].includes(epdDriverSelect.value)) {
+      if (['08', '09', '0e', '0f'].includes(driver)) {
         const emptyData = new Uint8Array(processedData.length).fill(0xFF);
-        await writeImage(convertUC8159(processedData, emptyData), 'bw');
+        await writeImage(convertUC8159(processedData, emptyData), 'bw', transferSettings);
       } else {
-        await writeImage(processedData, 'bw');
+        await writeImage(processedData, 'bw', transferSettings);
       }
     } else if (ditherMode === 'fourColor' || ditherMode === 'sixColor') {
-      await writeImage(processedData, 'bw');
+      await writeImage(processedData, 'bw', transferSettings);
     } else {
-      throw new Error('当前固件不支持此颜色模式');
+      throw new Error('The current firmware does not support this color mode');
     }
 
     if (await write(EpdCmd.REFRESH) !== true) {
-      throw new Error('REFRESH 写入失败');
+      throw new Error('REFRESH write failed');
     }
 
     const sendTime = (new Date().getTime() - startTime) / 1000.0;
-    const message = `传输命令已完成，请检查屏幕。耗时: ${sendTime}s`;
+    const message = `传输完成，请检查屏幕。耗时: ${sendTime}s`;
     addLog(message);
     setStatus(message);
     return { ok: true };
@@ -333,7 +428,7 @@ async function sendimg() {
 
 function downloadDataArray() {
   if (cropManager.isCropMode()) {
-    alert("请先完成图片裁剪！下载已取消。");
+    alert("Finish cropping the image first. Download cancelled.");
     return;
   }
 
@@ -342,8 +437,8 @@ function downloadDataArray() {
   const processedData = processImageData(imageData, mode);
 
   if (mode === 'sixColor' && processedData.length !== canvas.width * canvas.height) {
-    console.log(`错误：预期${canvas.width * canvas.height}字节，但得到${processedData.length}字节`);
-    addLog('数组大小不匹配。请检查图像尺寸和模式。');
+    console.log(`Expected ${canvas.width * canvas.height} bytes, received ${processedData.length}`);
+    addLog('数据大小不匹配，请检查图片尺寸和颜色模式。');
     return;
   }
 
@@ -380,22 +475,37 @@ function updateButtonStatus(forceDisabled = false) {
   const connected = Boolean(gattServer && gattServer.connected);
   const imageInput = document.getElementById('imageFile');
   const imageReady = uploadState ? uploadState.hasImage : Boolean(imageInput && imageInput.files && imageInput.files.length);
-  const reconnect = document.getElementById('reconnectbutton');
-  if (reconnect) reconnect.disabled = !bleDevice || connected || connectionInProgress || uploadInProgress;
-  const connect = document.getElementById('connectbutton');
-  if (connect) connect.disabled = connectionInProgress || uploadInProgress;
+  for (const id of ['reconnectbutton', 'customReconnectButton']) {
+    const reconnect = document.getElementById(id);
+    if (reconnect) reconnect.disabled = !bleDevice || connected || connectionInProgress || uploadInProgress;
+  }
+  for (const id of ['connectbutton', 'customConnectButton']) {
+    const connect = document.getElementById(id);
+    if (connect) {
+      connect.disabled = connectionInProgress || uploadInProgress;
+      connect.textContent = connected ? '断开' : '连接';
+    }
+  }
+  const customSend = document.getElementById('customUploadButton');
+  if (customSend) customSend.disabled = !connected || !customDeviceReady() || !hasValidCurrentSlot() ||
+    deviceSlots.count === 0 || !globalThis.EpdStaticDashboard?.validatePixels(customPixels) ||
+    forceDisabled || connectionInProgress || uploadInProgress;
+  const generate = document.getElementById('generateDashboard');
+  if (generate) generate.disabled = connectionInProgress || uploadInProgress;
   const send = document.getElementById('sendimgbutton');
-  if (send) send.disabled = !connected || !deviceConfig || !imageReady || forceDisabled || connectionInProgress || uploadInProgress;
+  if (send) send.disabled = !connected || !deviceConfig || !imageReady ||
+    (deviceConfig.driver === '16' && !hasValidCurrentSlot()) || forceDisabled || connectionInProgress || uploadInProgress;
   for (const id of ['sendcmdbutton', 'calendarmodebutton', 'clockmodebutton', 'clearscreenbutton', 'setDriverbutton']) {
     const button = document.getElementById(id);
     if (button) button.disabled = !connected || forceDisabled || connectionInProgress || uploadInProgress;
   }
   renderConnectionStatus();
+  renderBatteryStatus();
 }
 
 function renderConnectionStatus() {
   const connected = Boolean(gattServer && gattServer.connected);
-  const label = uploadInProgress ? '传输中' : connectionInProgress ? '连接中' : connected ? '已连接' : bleDevice ? '已断开' : '未连接';
+  const label = uploadInProgress ? 'TRANSFERRING' : connectionInProgress ? 'CONNECTING' : connected ? 'ONLINE' : bleDevice ? 'DISCONNECTED' : 'OFFLINE';
   const phase = uploadInProgress ? 'sending' : connectionInProgress ? 'connecting' : connected ? 'connected' : bleDevice ? 'error' : 'idle';
   const stateNode = document.getElementById('connectionState');
   const dotNode = document.getElementById('connectionDot');
@@ -403,8 +513,8 @@ function renderConnectionStatus() {
   const guideNode = document.getElementById('guideText');
   if (stateNode) stateNode.textContent = label;
   if (dotNode) dotNode.className = `status-dot ${phase}`;
-  if (nameNode) nameNode.textContent = bleDevice ? bleDevice.name : '尚未选择设备';
-  if (guideNode) guideNode.textContent = uploadInProgress ? '图片正在传输，请保持页面与设备连接。' : connected ? '选择图片并确认预览，准备好后手动上传。' : bleDevice ? '连接已断开，可点击“重连”。' : '先连接墨水屏，然后选择图片并预览。';
+  if (nameNode) nameNode.textContent = bleDevice ? bleDevice.name : 'NOT SELECTED';
+  if (guideNode) guideNode.textContent = uploadInProgress ? '传输进行中，请保持设备连接。' : connected ? '请检查预览后手动上传。' : bleDevice ? '连接已断开，可点击“重连”。' : '先连接墨水屏，然后选择图片并预览。';
 }
 
 function disconnect() {
@@ -417,8 +527,8 @@ function disconnect() {
       catch (error) { addLog(`断开 GATT 失败：${error.message || error}`); }
     }
     if (uploadState) uploadState.setStatus('error');
-    addLog('已断开连接.');
-    setStatus('设备已断开，可点击“重连”');
+    addLog('已断开连接。');
+    setStatus('设备已断开，可点击“重连”。');
     document.getElementById("connectbutton").innerHTML = '连接';
     updateButtonStatus();
   } finally {
@@ -447,7 +557,7 @@ async function preConnect() {
     } catch (e) {
       console.error(e);
       if (e.message) addLog("requestDevice: " + e.message);
-      setStatus(e.name === 'NotFoundError' ? '已取消设备选择' : '蓝牙设备选择失败，请检查 Edge 与蓝牙状态');
+      setStatus(e.name === 'NotFoundError' ? '已取消设备选择' : '蓝牙设备选择失败，请检查 Edge 和蓝牙状态。');
       if (uploadState) uploadState.setStatus('error');
       connectionInProgress = false;
       updateButtonStatus();
@@ -486,12 +596,19 @@ async function reConnect() {
 
 function handleNotify(value, idx) {
   const data = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  if (idx == 0) {
+  // The firmware sends the binary configuration first, but registering the
+  // listener before startNotifications makes that ordering non-critical.
+  // Keep a content check as a second guard so a textual status packet can
+  // never be interpreted as pin/model configuration.
+  const isText = data.every(byte => byte >= 0x20 && byte <= 0x7e);
+  const isConfig = !configNotificationSeen && data.length >= 8 && !isText;
+  if (isConfig) {
+    configNotificationSeen = true;
     addLog(`收到配置：${bytes2hex(data)}`);
     const epdpins = document.getElementById("epdpins");
     const epddriver = document.getElementById("epddriver");
     if (data.length < 8) {
-      setStatus('设备配置数据不完整，请勿上传');
+      setStatus('设备配置数据不完整，请勿上传。');
       return;
     }
     epdpins.value = bytes2hex(data.slice(0, 7));
@@ -499,7 +616,7 @@ function handleNotify(value, idx) {
     epddriver.value = bytes2hex(data.slice(7, 8));
     const selectedOption = epddriver.options[epddriver.selectedIndex];
     if (!selectedOption) {
-      setStatus('设备驱动未被当前网页识别，请勿上传');
+      setStatus('设备驱动未被当前网页识别，请勿上传。');
       return;
     }
     deviceConfig = {
@@ -508,6 +625,7 @@ function handleNotify(value, idx) {
       color: selectedOption.getAttribute('data-color'),
     };
     updateDitcherOptions();
+    if (deviceConfig.driver === '16' && !hasValidCurrentSlot()) setStatus('等待有效的设备槽位后才能上传。');
     updateButtonStatus();
   } else {
     if (textDecoder == null) textDecoder = new TextDecoder();
@@ -521,10 +639,34 @@ function handleNotify(value, idx) {
         rleSupport = true;
         addLog('已开启 RLE 压缩传输支持');
       }
+    } else if (msg.startsWith('slots=')) {
+      const match = /^slots=(\d+)\s+(\d+)(?:\s+(-?\d+))?$/.exec(msg.trim());
+      if (match) {
+        const count = Number(match[1]);
+        const priorMask = deviceSlots && deviceSlots.count === count ? deviceSlots.usedMask : 0n;
+        deviceSlots = {
+          count,
+          usedMask: BigInt(match[2]) | priorMask,
+          selected: match[3] === undefined ? -1 : Number(match[3]),
+        };
+        if (deviceConfig && deviceConfig.driver === '16') {
+          setStatus(hasValidCurrentSlot() ? '设备槽位已收到，请检查预览后上传。' : '设备槽位信息无效。');
+        }
+        updateButtonStatus();
+      }
     } else if (msg.startsWith('t=') && msg.length > 2) {
-      const t = parseInt(msg.substring(2)) + new Date().getTimezoneOffset() * 60;
+      const parts = msg.substring(2).trim().split(/\s+/);
+      const t = parseInt(parts[0]) + new Date().getTimezoneOffset() * 60;
       addLog(`远端时间: ${new Date(t * 1000).toLocaleString()}`);
       addLog(`本地时间: ${new Date().toLocaleString()}`);
+      const batteryToken = parts.find((part) => part.startsWith('bat='));
+      if (batteryToken) {
+        const reportedMv = Number.parseInt(batteryToken.slice(4), 10);
+        if (Number.isFinite(reportedMv) && reportedMv >= 0) {
+          batteryMv = reportedMv;
+          renderBatteryStatus();
+        }
+      }
     }
   }
 }
@@ -558,18 +700,23 @@ async function connect() {
   }
 
   if (appVersion < 0x16) {
-    addLog('固件版本较低，本地网页可能无法完整支持；请先核对设备兼容性。');
-    setStatus('设备固件版本较低，请核对后再上传');
+    addLog('固件版本较低，本地网页可能无法完整支持，请先核对设备兼容性。');
+    setStatus('设备固件版本较低，请核对后再上传。');
   }
+
+  // Register before enabling notifications: some firmware sends its binary
+  // configuration immediately when the CCCD is written.
+  epdCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+    handleNotify(event.target.value, msgIndex++);
+  });
 
   try {
     await epdCharacteristic.startNotifications();
-    epdCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-      handleNotify(event.target.value, msgIndex++);
-    });
   } catch (e) {
     console.error(e);
     if (e.message) addLog("startNotifications: " + e.message);
+    disconnect();
+    return;
   }
 
   if (await write(EpdCmd.INIT) !== true) {
@@ -580,12 +727,14 @@ async function connect() {
 
   document.getElementById("connectbutton").innerHTML = '断开';
   if (uploadState) uploadState.setStatus('connected');
-  if (!deviceConfig) setStatus('已连接，等待设备配置通知后才能上传');
+  if (!deviceConfig) setStatus('已连接，等待设备配置通知。');
   updateButtonStatus();
 }
 
 function setStatus(statusText) {
   document.getElementById("status").textContent = statusText;
+  const customStatus = document.getElementById('dashboardStatus');
+  if (customStatus) customStatus.textContent = statusText;
 }
 
 function addLog(logTXT, action = '') {
@@ -656,17 +805,17 @@ function updateImage() {
       ctx.drawImage(image, 0, 0, image.width, image.height, 0, 0, canvas.width, canvas.height);
       convertDithering();
       if (uploadState) uploadState.setImage(true);
-      setStatus('图片已准备好，请检查预览');
+      setStatus('图片已准备好，请检查预览。');
       updateButtonStatus();
     } else {
-      setStatus('图片比例不同，请在预览区完成裁剪');
+      setStatus('图片比例不同，请在预览区完成裁剪。');
       cropManager.initializeCrop();
     }
   };
   image.onerror = function () {
     URL.revokeObjectURL(this.src);
     if (revision !== imageRevision || imageFile.files[0] !== selectedFile) return;
-    setStatus('图片无法解码，请重新选择文件');
+    setStatus('图片无法解码，请重新选择文件。');
     if (uploadState) uploadState.setImage(false);
     updateButtonStatus();
   };
@@ -689,7 +838,7 @@ function updateDitcherOptions() {
   const epdDriverSelect = document.getElementById('epddriver');
   const selectedOption = epdDriverSelect.options[epdDriverSelect.selectedIndex];
   if (!selectedOption) {
-    setStatus('设备驱动未被当前网页识别，请勿上传');
+    setStatus('设备驱动未被当前网页识别，请勿上传。');
     return;
   }
   const colorMode = selectedOption.getAttribute('data-color');
@@ -731,7 +880,7 @@ function rotateCanvas() {
 }
 
 function clearCanvas() {
-  if (confirm('清除画布内容?')) {
+  if (confirm('清除画布内容？')) {
     fillCanvas('white');
     paintManager.clearElements(); // Clear stored text positions and line segments
     if (cropManager.isCropMode()) cropManager.exitCropMode();
@@ -777,7 +926,7 @@ function applyDither() {
     if (!isCurrent()) return;
     convertDithering();
     if (uploadState) uploadState.setImage(true);
-    setStatus('图片已准备好，请检查预览');
+    setStatus('图片已准备好，请检查预览。');
     updateButtonStatus();
   }, isCurrent);
 }
@@ -793,6 +942,21 @@ function initEventHandlers() {
   });
 }
 
+function renderCustomImage() {
+  if (connectionInProgress || uploadInProgress) return;
+  const dashboard = globalThis.EpdStaticDashboard;
+  const pixels = dashboard.createPixels(undefined, quotaState);
+  if (!dashboard.validatePixels(pixels)) {
+    document.getElementById('dashboardStatus').textContent = '看板无效，无法生成预览。';
+    return;
+  }
+  const image = dashboard.toImageData(pixels);
+  document.getElementById('dashboardCanvas').getContext('2d').putImageData(image, 0, 0);
+  customPixels = pixels;
+  document.getElementById('dashboardStatus').textContent = '看板已生成，请检查预览。';
+  updateButtonStatus();
+}
+
 function checkDebugMode() {
   const link = document.getElementById('debug-toggle');
   const urlParams = new URLSearchParams(window.location.search);
@@ -800,18 +964,78 @@ function checkDebugMode() {
 
   if (debugMode === 'true') {
     document.body.classList.add('dark-mode');
-    link.innerHTML = '正常模式';
+    link.innerHTML = 'Normal mode';
     link.setAttribute('href', window.location.pathname);
-    addLog("注意：开发模式功能已开启！不懂请不要随意修改，否则后果自负！");
+    addLog("开发模式已开启。");
   } else {
     document.body.classList.remove('dark-mode');
-    link.innerHTML = '开发模式';
+    link.innerHTML = 'Developer mode';
     link.setAttribute('href', window.location.pathname + '?debug=true');
+  }
+}
+
+function quotaResetLabel(windowData) {
+  if (!windowData || !Number.isFinite(Number(windowData.reset_at))) return '重置 --';
+  const date = new Date(Number(windowData.reset_at) * 1000);
+  if (Number.isNaN(date.getTime())) return '重置 --';
+  return `重置 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function quotaUpdatedLabel(updatedAt) {
+  if (!updatedAt) return '未更新';
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return '未更新';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')} 更新`;
+}
+
+function renderQuotaState(nextState) {
+  quotaState = nextState || { status: 'unavailable', five_hour: null, seven_day: null };
+  const fiveHour = quotaState.status === 'ok' && quotaState.five_hour ? `${quotaState.five_hour.remaining_percent}%` : '--';
+  const sevenDay = quotaState.status === 'ok' && quotaState.seven_day ? `${quotaState.seven_day.remaining_percent}%` : '--';
+  const fiveNode = document.getElementById('quotaFiveHour');
+  const sevenNode = document.getElementById('quotaSevenDay');
+  const fiveReset = document.getElementById('quotaFiveHourReset');
+  const sevenReset = document.getElementById('quotaSevenDayReset');
+  const statusNode = document.getElementById('quotaStatusText');
+  const updatedNode = document.getElementById('quotaUpdated');
+  const topNode = document.getElementById('quotaTopValue');
+  if (fiveNode) fiveNode.textContent = fiveHour;
+  if (sevenNode) sevenNode.textContent = sevenDay;
+  if (fiveReset) fiveReset.textContent = quotaResetLabel(quotaState.five_hour);
+  if (sevenReset) sevenReset.textContent = quotaResetLabel(quotaState.seven_day);
+  if (topNode) topNode.textContent = `${fiveHour} / ${sevenDay}`;
+  if (statusNode) statusNode.textContent = quotaState.status === 'ok'
+    ? '额度已更新'
+    : quotaState.status === 'unauthenticated' ? '需要 Codex 登录' : (quotaState.error || '额度暂不可用');
+  if (updatedNode) updatedNode.textContent = quotaUpdatedLabel(quotaState.updated_at);
+  if (customPixels && globalThis.EpdStaticDashboard) renderCustomImage();
+}
+
+async function refreshQuota() {
+  if (!quotaController) return;
+  const button = document.getElementById('refreshQuotaButton');
+  if (button) button.disabled = true;
+  try {
+    await quotaController.refresh();
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
 document.body.onload = () => {
   textDecoder = null;
+  EpdViewTabs.create({
+    tabs: {
+      file: document.getElementById('tab-file'),
+      custom: document.getElementById('tab-custom'),
+    },
+    panels: {
+      file: document.getElementById('view-file'),
+      custom: document.getElementById('view-custom'),
+    },
+    isBusy: () => connectionInProgress || uploadInProgress,
+    onSelect: () => {},
+  });
   canvas = document.getElementById('canvas');
   ctx = canvas.getContext("2d");
 
@@ -823,5 +1047,12 @@ document.body.onload = () => {
 
   cropManager.initCropTools();
   initEventHandlers();
+  document.getElementById('generateDashboard').addEventListener('click', renderCustomImage);
+  const refreshQuotaButton = document.getElementById('refreshQuotaButton');
+  if (globalThis.EpdQuota && refreshQuotaButton) {
+    quotaController = globalThis.EpdQuota.createController({ onChange: renderQuotaState });
+    refreshQuotaButton.addEventListener('click', refreshQuota);
+    if (typeof globalThis.fetch === 'function') quotaController.start();
+  }
   updateButtonStatus();
 }

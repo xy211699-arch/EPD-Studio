@@ -6,3 +6,16 @@ __pycache__/
 build/
 dist/
 *.spec.bak
+.env
+.env.*
+.codex/
+auth.json
+*.sqlite
+*.sqlite-*
+*.log
+*.tmp
+*.bak
+/dashboard-latest.png
+/ble_*_probe.py
+/epd_ble_test.png
+/参考图片.png

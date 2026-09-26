@@ -11,24 +11,29 @@
 <body>
   <header class="telemetry">
     <div class="brand">EPD <strong>STUDIO</strong></div>
-    <div class="tele-item"><span class="tele-label">DEVICE</span><span id="deviceName">尚未选择设备</span></div>
-    <div class="tele-item"><span class="status-dot" id="connectionDot"></span><span class="tele-label">LINK</span><span id="connectionState">未连接</span></div>
+    <div class="tele-item"><span class="tele-label">DEVICE</span><span id="deviceName">NOT SELECTED</span></div>
+    <div class="tele-item"><span class="status-dot" id="connectionDot"></span><span class="tele-label">LINK</span><span id="connectionState">OFFLINE</span></div>
+    <div class="tele-item tele-battery" id="batteryStatus" hidden aria-live="polite"><span class="tele-label">BATTERY</span><span id="batteryValue">--</span></div>
+    <div class="tele-item tele-quota" aria-live="polite"><span class="tele-label">CODEX</span><span id="quotaTopValue">-- / --</span></div>
     <div class="tele-spacer"></div>
     <div class="tele-tag">LOCAL / EDGE</div>
   </header>
 
-  <div class="page-shell">
-    <div class="guidebar" role="status"><span class="guide-step">01 / 03</span><span id="guideText">先连接墨水屏，然后选择图片并预览。</span><span class="guide-hint">蓝牙连接与上传均由你手动发起</span></div>
+  <nav id="viewTabs" class="view-tabs" role="tablist" aria-label="Views">
+    <button id="tab-file" type="button" role="tab" aria-controls="view-file" aria-selected="true" data-view="file" tabindex="0">01&nbsp;&nbsp;Original</button>
+    <button id="tab-custom" type="button" role="tab" aria-controls="view-custom" aria-selected="false" data-view="custom" tabindex="-1">02&nbsp;&nbsp;Custom</button>
+  </nav>
 
-    <main class="workspace">
+  <div class="page-shell">
+    <div class="guidebar" role="status"><span class="guide-step">01 / 03</span><span id="guideText">先连接墨水屏，然后选择图片并预览。</span></div>
+
+    <main id="view-file" class="workspace" role="tabpanel" aria-labelledby="tab-file">
       <section class="panel control-panel" aria-labelledby="control-heading">
         <div class="panel-eyebrow">UPLOAD WORKFLOW</div>
         <h1 id="control-heading">图片上传</h1>
-        <p class="panel-intro">确认画面后再发送到墨水屏。页面不会自动连接或重复上传。</p>
 
         <div class="step-block">
           <div class="step-heading"><span class="step-badge">1</span><h2>连接设备</h2></div>
-          <p class="step-help">首次使用点“连接”；同一页面断线后可点“重连”。</p>
           <div class="button-row">
             <button id="connectbutton" type="button" class="btn btn-dark" onclick="preConnect()">连接</button>
             <button id="reconnectbutton" type="button" class="btn btn-subtle" onclick="reConnect()" disabled>重连</button>
@@ -39,11 +44,10 @@
           <div class="step-heading"><span class="step-badge">2</span><h2>准备图片</h2></div>
           <label class="field-label" for="imageFile">选择本地图片</label>
           <input type="file" id="imageFile" accept=".png,.jpg,.bmp,.webp,.jpeg" onchange="updateImage()">
-          <p class="step-help">支持 PNG、JPG、BMP 和 WebP。比例不符时可在预览区裁剪。</p>
           <div class="field-grid">
-            <label class="field"><span>抖动算法</span><select id="ditherAlg" onchange="applyDither()"><option value="floydSteinberg">Floyd–Steinberg</option><option value="atkinson">Atkinson</option><option value="bayer">Bayer</option><option value="stucki">Stucki</option><option value="jarvis">Jarvis–Judice–Ninke</option><option value="none">无抖动</option></select></label>
-            <label class="field"><span>抖动强度 <b id="ditherStrengthValue">1.0</b></span><input type="range" min="0" max="5" step="0.1" value="1.0" id="ditherStrength"></label>
-            <label class="field field-wide"><span>对比度 <b id="ditherContrastValue">1.2</b></span><input type="range" min="0.5" max="2" step="0.1" value="1.2" id="ditherContrast"></label>
+            <label class="field"><span>Dither Algorithm</span><select id="ditherAlg" onchange="applyDither()"><option value="floydSteinberg">Floyd–Steinberg</option><option value="atkinson">Atkinson</option><option value="bayer">Bayer</option><option value="stucki">Stucki</option><option value="jarvis">Jarvis–Judice–Ninke</option><option value="none">None</option></select></label>
+            <label class="field"><span>Dither Strength <b id="ditherStrengthValue">1.0</b></span><input type="range" min="0" max="5" step="0.1" value="1.0" id="ditherStrength"></label>
+            <label class="field field-wide"><span>Contrast <b id="ditherContrastValue">1.2</b></span><input type="range" min="0.5" max="2" step="0.1" value="1.2" id="ditherContrast"></label>
           </div>
         </div>
 
@@ -52,52 +56,82 @@
           <p class="step-help">连接后会按设备配置更新。仅在明确了解设备驱动时调整。</p>
           <label class="field-label" for="epddriver">设备驱动</label>
           <select id="epddriver" onchange="updateDitcherOptions()">
-            <option value="01" data-color="blackWhiteColor" data-size="4.2_400_300">4.2寸 黑白 UC8176</option>
-            <option value="03" data-color="threeColor" data-size="4.2_400_300">4.2寸 三色 UC8176</option>
-            <option value="04" data-color="blackWhiteColor" data-size="4.2_400_300">4.2寸 黑白 SSD1619</option>
-            <option value="02" data-color="threeColor" data-size="4.2_400_300">4.2寸 三色 SSD1619</option>
-            <option value="05" data-color="fourColor" data-size="4.2_400_300">4.2寸 四色 JD79668</option>
-            <option value="0f" data-color="blackWhiteColor" data-size="5.83_600_448">5.83寸低分 黑白 UC8159</option>
-            <option value="0e" data-color="threeColor" data-size="5.83_600_448">5.83寸低分 三色 UC8159</option>
-            <option value="11" data-color="blackWhiteColor" data-size="5.83_648_480">5.83寸 黑白 UC8179</option>
-            <option value="10" data-color="threeColor" data-size="5.83_648_480">5.83寸 三色 UC8179</option>
-            <option value="0d" data-color="fourColor" data-size="5.83_648_480">5.83寸 四色 JD79665</option>
-            <option value="06" data-color="blackWhiteColor" data-size="7.5_800_480">7.5寸 黑白 UC8179</option>
-            <option value="07" data-color="threeColor" data-size="7.5_800_480">7.5寸 三色 UC8179</option>
-            <option value="0c" data-color="fourColor" data-size="7.5_800_480">7.5寸 四色 JD79665</option>
-            <option value="08" data-color="blackWhiteColor" data-size="7.5_640_384">7.5寸低分 黑白 UC8159</option>
-            <option value="09" data-color="threeColor" data-size="7.5_640_384">7.5寸低分 三色 UC8159</option>
-            <option value="0a" data-color="blackWhiteColor" data-size="7.5_880_528">7.5寸HD 黑白 SSD1677</option>
-            <option value="0b" data-color="threeColor" data-size="7.5_880_528">7.5寸HD 三色 SSD1677</option>
+            <option value="01" data-color="blackWhiteColor" data-size="4.2_400_300">4.2 in Black / White UC8176</option>
+            <option value="03" data-color="threeColor" data-size="4.2_400_300">4.2 in Black / White / Red UC8176</option>
+            <option value="04" data-color="blackWhiteColor" data-size="4.2_400_300">4.2 in Black / White SSD1619</option>
+            <option value="02" data-color="threeColor" data-size="4.2_400_300">4.2 in Black / White / Red SSD1619</option>
+            <option value="16" data-color="threeColor" data-size="4.2_400_300">4.2 in Black / White / Red SSD1683</option>
+            <option value="05" data-color="fourColor" data-size="4.2_400_300">4.2 in Four Color JD79668</option>
+            <option value="0f" data-color="blackWhiteColor" data-size="5.83_600_448">5.83 in Low-Res Black / White UC8159</option>
+            <option value="0e" data-color="threeColor" data-size="5.83_600_448">5.83 in Low-Res Black / White / Red UC8159</option>
+            <option value="11" data-color="blackWhiteColor" data-size="5.83_648_480">5.83 in Black / White UC8179</option>
+            <option value="10" data-color="threeColor" data-size="5.83_648_480">5.83 in Black / White / Red UC8179</option>
+            <option value="0d" data-color="fourColor" data-size="5.83_648_480">5.83 in Four Color JD79665</option>
+            <option value="06" data-color="blackWhiteColor" data-size="7.5_800_480">7.5 in Black / White UC8179</option>
+            <option value="07" data-color="threeColor" data-size="7.5_800_480">7.5 in Black / White / Red UC8179</option>
+            <option value="0c" data-color="fourColor" data-size="7.5_800_480">7.5 in Four Color JD79665</option>
+            <option value="08" data-color="blackWhiteColor" data-size="7.5_640_384">7.5 in Low-Res Black / White UC8159</option>
+            <option value="09" data-color="threeColor" data-size="7.5_640_384">7.5 in Low-Res Black / White / Red UC8159</option>
+            <option value="0a" data-color="blackWhiteColor" data-size="7.5_880_528">7.5 in HD Black / White SSD1677</option>
+            <option value="0b" data-color="threeColor" data-size="7.5_880_528">7.5 in HD Black / White / Red SSD1677</option>
           </select>
           <div class="field-grid advanced-grid">
-            <label class="field"><span>画布尺寸</span><select id="canvasSize" onchange="updateCanvasSize()">
+            <label class="field"><span>Canvas Size</span><select id="canvasSize" onchange="updateCanvasSize()">
               <option value="1.54_152_152">152 × 152</option><option value="1.54_200_200">200 × 200</option><option value="2.13_104_212">104 × 212</option><option value="2.13_122_250">122 × 250</option><option value="2.66_152_296">152 × 296</option><option value="2.66_184_360">184 × 360</option><option value="2.9_128_296">128 × 296</option><option value="2.9_168_384">168 × 384</option><option value="3.5_184_384">184 × 384</option><option value="3.5_360_600">360 × 600</option><option value="3.7_240_416">240 × 416</option><option value="3.7_280_480">280 × 480</option><option value="3.97_800_480">800 × 480</option><option value="3.98_768_552">768 × 552</option><option value="4.2_400_300" selected>400 × 300</option><option value="5.79_792_272">792 × 272</option><option value="5.83_600_448">600 × 448</option><option value="5.83_648_480">648 × 480</option><option value="7.5_640_384">640 × 384</option><option value="7.5_800_480">800 × 480</option><option value="7.5_880_528">880 × 528</option><option value="10.2_960_640">960 × 640</option><option value="10.85_1360_480">1360 × 480</option><option value="11.6_960_640">960 × 640</option><option value="4.0E6_600_400">600 × 400</option><option value="7.3E6_800_480">800 × 480</option>
             </select></label>
             <label class="field"><span>颜色模式</span><select id="ditherMode" onchange="applyDither()"><option value="blackWhiteColor">黑白</option><option value="threeColor">黑白红</option><option value="fourColor">黑白红黄</option><option value="sixColor">六色</option></select></label>
             <label class="field"><span>MTU</span><input type="number" id="mtusize" value="20" min="3" max="255"></label>
-            <label class="field"><span>确认间隔</span><input type="number" id="interleavedcount" value="50" min="0" max="500"></label>
+            <label class="field"><span>确认间隔</span><input type="number" id="interleavedcount" value="10" min="0" max="500"></label>
           </div>
           <input id="epdpins" type="hidden" value="">
         </details>
 
         <div class="step-block upload-step">
           <div class="step-heading"><span class="step-badge">3</span><h2>确认并上传</h2></div>
-          <p class="step-help">上传前核对右侧预览。传输完成后仍需查看实体屏幕。</p>
           <button id="sendimgbutton" type="button" class="btn btn-accent" onclick="sendimg()" disabled>上传图片</button>
         </div>
       </section>
 
       <section class="panel preview-panel" aria-labelledby="preview-heading">
         <div class="preview-header"><div><div class="panel-eyebrow">DISPLAY PREVIEW</div><h2 id="preview-heading">墨水屏预览</h2></div><span class="resolution" id="resolutionLabel">400 × 300</span></div>
-        <div class="preview-stage"><div class="canvas-container"><div class="canvas-title"></div><canvas id="canvas" width="400" height="300" aria-label="图片预览画布"></canvas><div class="crop-tools"><button id="crop-zoom-in" type="button" class="btn btn-subtle" title="放大">放大</button><button id="crop-zoom-out" type="button" class="btn btn-subtle" title="缩小">缩小</button><button id="crop-move-left" type="button" class="btn btn-subtle" title="左移">左移</button><button id="crop-move-up" type="button" class="btn btn-subtle" title="上移">上移</button><button id="crop-move-down" type="button" class="btn btn-subtle" title="下移">下移</button><button id="crop-move-right" type="button" class="btn btn-subtle" title="右移">右移</button><button id="crop-finish" type="button" class="btn btn-dark" onclick="applyDither()">完成裁剪</button></div></div></div>
+        <div class="preview-stage"><div class="canvas-container"><div class="canvas-title"></div><canvas id="canvas" width="400" height="300" aria-label="Original image preview"></canvas><div class="crop-tools"><button id="crop-zoom-in" type="button" class="btn btn-subtle" title="Zoom in">Zoom in</button><button id="crop-zoom-out" type="button" class="btn btn-subtle" title="Zoom out">Zoom out</button><button id="crop-move-left" type="button" class="btn btn-subtle" title="Move left">Left</button><button id="crop-move-up" type="button" class="btn btn-subtle" title="Move up">Up</button><button id="crop-move-down" type="button" class="btn btn-subtle" title="Move down">Down</button><button id="crop-move-right" type="button" class="btn btn-subtle" title="Move right">Right</button><button id="crop-finish" type="button" class="btn btn-dark" onclick="applyDither()">Finish Crop</button></div></div></div>
         <div class="status-bar"><span class="status-label">当前状态</span><span id="status" role="status" aria-live="polite">等待连接和图片</span></div>
-        <p class="preview-note">预览用于检查裁剪和抖动效果；蓝牙写入完成不等于屏幕已物理刷新。</p>
+      </section>
+    </main>
+
+    <main id="view-custom" class="workspace" role="tabpanel" aria-labelledby="tab-custom" hidden>
+      <section class="panel control-panel" aria-labelledby="custom-control-heading">
+        <section class="quota-card" aria-labelledby="quota-heading">
+          <div class="quota-card-head"><h2 id="quota-heading">Codex额度</h2><button id="refreshQuotaButton" type="button" class="btn btn-subtle">刷新额度</button></div>
+          <div class="quota-grid">
+            <div class="quota-row"><span class="quota-name">5h</span><strong id="quotaFiveHour">--</strong><span id="quotaFiveHourReset" class="quota-reset">重置 --</span></div>
+            <div class="quota-row"><span class="quota-name">7d</span><strong id="quotaSevenDay">--</strong><span id="quotaSevenDayReset" class="quota-reset">重置 --</span></div>
+          </div>
+          <div class="quota-meta"><span id="quotaStatusText" role="status" aria-live="polite">等待读取额度</span><span id="quotaUpdated">未更新</span></div>
+        </section>
+        <div class="panel-eyebrow">CUSTOM WORKFLOW</div>
+        <h1 id="custom-control-heading">自定义看板</h1>
+        <div class="step-block">
+          <div class="step-heading"><span class="step-badge">1</span><h2>连接设备</h2></div>
+          <div class="button-row">
+            <button id="customConnectButton" type="button" class="btn btn-dark" onclick="preConnect()">连接</button>
+            <button id="customReconnectButton" type="button" class="btn btn-subtle" onclick="reConnect()" disabled>重连</button>
+          </div>
+        </div>
+        <div class="step-block">
+          <div class="step-heading"><span class="step-badge">2</span><h2>生成并上传</h2></div>
+          <button id="generateDashboard" type="button" class="btn btn-dark">生成看板</button>
+          <button id="customUploadButton" type="button" class="btn btn-primary" onclick="sendimg('custom')" disabled>上传到屏幕</button>
+        </div>
+      </section>
+      <section class="panel preview-panel" aria-labelledby="custom-preview-heading">
+        <div class="preview-header"><div><div class="panel-eyebrow">DISPLAY PREVIEW</div><h2 id="custom-preview-heading">自定义预览</h2></div><span class="resolution">400 × 300</span></div>
+        <div class="preview-stage dashboard-stage"><canvas id="dashboardCanvas" width="400" height="300" aria-label="Custom tri-color dashboard preview"></canvas></div>
+        <div class="status-bar"><span class="status-label">当前状态</span><span id="dashboardStatus" role="status" aria-live="polite">等待生成看板</span></div>
       </section>
     </main>
 
     <details class="log-panel"><summary>传输日志 <span>故障排查时展开</span></summary><div class="log-container" id="log" aria-live="polite"></div><button type="button" class="btn btn-subtle" onclick="clearLog()">清空日志</button></details>
-    <footer class="footer"><span>EPD STUDIO · 本地运行</span><a href="https://github.com/tsl0922/EPD-nRF5" target="_blank" rel="noreferrer">源站项目</a></footer>
   </div>
 
   <script src="js/dithering.js"></script>
@@ -105,6 +139,9 @@
   <script src="js/paint.js"></script>
   <script src="js/crop.js"></script>
   <script src="js/upload-state.js"></script>
+  <script src="js/view-tabs.js"></script>
+  <script src="js/quota-state.js"></script>
+  <script src="js/static-dashboard.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
